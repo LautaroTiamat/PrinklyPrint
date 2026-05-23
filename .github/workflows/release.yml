@@ -58,9 +58,14 @@ jobs:
       - name: Generate tray icons
         run: |
           mkdir -p internal/tray/assets
+          # Ubuntu trae ImageMagick v6 cuyo binario es `convert`; Alpine (Docker
+          # local) trae v7 con `magick`. Usamos cualquiera de los dos según lo
+          # que esté disponible — la sintaxis del comando es idéntica para
+          # nuestro caso (draw + clone + resize).
+          MAGICK=$(command -v magick || command -v convert)
           for spec in "green:#2ea044" "yellow:#d9a307" "red:#dc2626"; do
             name="${spec%:*}"; color="${spec#*:}"
-            magick icons/icon_256x256.png \
+            $MAGICK icons/icon_256x256.png \
               -fill white -draw "circle 200,200 200,160" \
               -fill "$color" -draw "circle 200,200 200,165" \
               \( -clone 0 -resize 16x16 \) \
