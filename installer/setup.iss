@@ -43,7 +43,7 @@ VersionInfoProductName={#MyAppName}
 VersionInfoCompany={#MyAppPublisher}
 Compression=lzma2/ultra64
 SolidCompression=yes
-OutputDir=..\..\dist
+OutputDir=..\dist
 ; Nombre del .exe sin versión para que el link
 ; /releases/latest/download/PrinklyPrint-Setup.exe siempre funcione.
 ; La versión queda embebida en VersionInfoVersion (visible en Propiedades del .exe).
@@ -74,7 +74,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "Iniciar {#MyAppName} cuando inicie Windows"; GroupDescription: "Inicio del sistema:"
 
 [Files]
-Source: "..\..\dist\prinklyprint.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\prinklyprint.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
