@@ -1,0 +1,156 @@
+# Build & release pipeline para PrinklyPrint.
+#
+# Se dispara al pushear un tag con formato vX.Y.Z (ej. v1.0.0). El flujo:
+#
+#   1. Linux runner: compila prinklyprint.exe (cross-compile a windows/amd64).
+#   2. Windows runner: agarra el .exe del paso anterior y arma el instalador
+#      con Inno Setup nativo (mucho más confiable que Wine en CI).
+#   3. Linux runner: publica un GitHub Release con ambos binarios adjuntos.
+#
+# Para liberar una versión nueva:
+#   git tag v1.1.0 && git push origin v1.1.0
+#
+# Eso es todo — el resto lo hace GitHub Actions.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-exe:
+    name: Build prinklyprint.exe
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends imagemagick
+
+      - name: Install rsrc
+        run: go install github.com/akavel/rsrc@latest
+
+      - name: Download SumatraPDF
+        run: |
+          mkdir -p internal/embedded
+          curl -fsSL -o internal/embedded/SumatraPDF.exe \
+            https://www.sumatrapdfreader.org/dl/rel/3.5.2/SumatraPDF-3.5.2-64.exe
+
+      - name: Generate rsrc.syso (manifest + .exe icon)
+        run: $(go env GOPATH)/bin/rsrc -manifest app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso
+
+      - name: Generate tray icons
+        run: |
+          mkdir -p internal/tray/assets
+          for spec in "green:#2ea044" "yellow:#d9a307" "red:#dc2626"; do
+            name="${spec%:*}"; color="${spec#*:}"
+            magick icons/icon_256x256.png \
+              -fill white -draw "circle 200,200 200,160" \
+              -fill "$color" -draw "circle 200,200 200,165" \
+              \( -clone 0 -resize 16x16 \) \
+              \( -clone 0 -resize 24x24 \) \
+              \( -clone 0 -resize 32x32 \) \
+              \( -clone 0 -resize 48x48 \) \
+              \( -clone 0 -resize 64x64 \) \
+              -delete 0 \
+              "internal/tray/assets/tray-$name.ico"
+          done
+
+      - name: Build prinklyprint.exe
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          mkdir -p dist
+          go build -tags with_sumatra -trimpath \
+            -ldflags="-s -w -H=windowsgui -X main.version=${{ steps.version.outputs.version }}" \
+            -o dist/prinklyprint.exe .
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prinklyprint-exe
+          path: dist/prinklyprint.exe
+          retention-days: 1
+
+  build-installer:
+    name: Build PrinklyPrint-Setup.exe
+    needs: build-exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: prinklyprint-exe
+          path: dist/
+
+      - name: Compile installer (Inno Setup is pre-installed on windows-latest)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          & $iscc "/DAppVersion=${{ needs.build-exe.outputs.version }}" installer\setup.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prinklyprint-installer
+          path: dist/PrinklyPrint-Setup.exe
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-exe, build-installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: prinklyprint-exe
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: prinklyprint-installer
+          path: dist/
+
+      - name: Extract changelog section for this version
+        id: changelog
+        run: |
+          VERSION="${{ needs.build-exe.outputs.version }}"
+          # Saca el bloque entre "## [VERSION]" y la siguiente sección "## ["
+          awk -v v="## [$VERSION]" '
+            $0 ~ "^## \\[" { if (found) exit; if (index($0, v)) { found=1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md || echo "Release $VERSION" > release-notes.md
+          cat release-notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: PrinklyPrint v${{ needs.build-exe.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            dist/prinklyprint.exe
+            dist/PrinklyPrint-Setup.exe
+          draft: false
+          prerelease: false

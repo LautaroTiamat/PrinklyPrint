@@ -1,0 +1,28 @@
+# Build artifacts
+/dist/
+*.exe
+*.syso
+
+# Embebidos descargados en build time (no versionar el binario de SumatraPDF)
+/internal/embedded/SumatraPDF.exe
+
+# Tray icons generados por ImageMagick en cada build
+/internal/tray/assets/tray-*.ico
+
+# Caches
+*.test
+*.out
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs locales si alguien corre la app en dev
+*.log
