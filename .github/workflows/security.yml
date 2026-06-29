@@ -108,15 +108,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25'
+          cache: true
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
         with:
           languages: go
-          # build-mode none: CodeQL analiza el código sin compilarlo. Evita el
-          # problema de que el build real necesita -tags with_sumatra + SumatraPDF
-          # + archivos windows-only, que no compilan en el runner Linux sin esos
-          # insumos.
-          build-mode: none
+          # El extractor de Go NO soporta build-mode: none (solo lo soportan
+          # lenguajes interpretados). Usamos autobuild, que compila el módulo en el
+          # runner Linux. El build estándar (go build ./...) usa las variantes
+          # _stub.go — las _windows.go quedan excluidas por build constraints —, así
+          # que NO necesita -tags with_sumatra ni el binario de SumatraPDF.
+          # setup-go (arriba) fija Go 1.25 para que el autobuild use el toolchain
+          # que pide go.mod.
+          build-mode: autobuild
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2

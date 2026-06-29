@@ -1,0 +1,23 @@
+# Configuración de gitleaks para PrinklyPrint.
+#
+# Partimos de TODAS las reglas por defecto de gitleaks (useDefault) y agregamos
+# una excepción de PATH para la documentación: la guía de pentest y el README
+# muestran requests de ejemplo con encabezados "Authorization: Bearer <token de
+# ejemplo>" (placeholders como token-falso o $TOKEN, NO secretos reales), que la
+# regla curl-auth-header marca como falso positivo.
+#
+# El allowlist está acotado a archivos de documentación (.md). El resto del repo
+# se sigue escaneando con todas las reglas. Como backstop, GitHub trae secret
+# scanning nativo + push protection (activar en Settings — ver README).
+
+title = "PrinklyPrint — gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ejemplos de la documentación (placeholders, no secretos reales)"
+paths = [
+  '''docs/.*\.md''',
+  '''README\.md''',
+]
