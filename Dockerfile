@@ -25,7 +25,7 @@
 #   docker buildx imagetools inspect golang:1.25-alpine --format '{{.Manifest.Digest}}'
 # Go 1.25 (no 1.22): la 1.22 quedó fuera de la ventana de parches y arrastra
 # vulnerabilidades de la stdlib que govulncheck marca (request smuggling, etc.).
-FROM golang:1.25-alpine@sha256:523c3effe300580ed375e43f43b1c9b091b68e935a7c3a92bfcc4e7ed55b18c2
+FROM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648
 
 RUN apk add --no-cache git ca-certificates curl imagemagick
 
