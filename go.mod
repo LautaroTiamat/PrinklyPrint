@@ -7,7 +7,7 @@ require (
 	github.com/akavel/rsrc v0.10.2
 	github.com/google/uuid v1.6.0
 	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
-	golang.org/x/sys v0.21.0
+	golang.org/x/sys v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.30.1
 )
