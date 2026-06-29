@@ -52,12 +52,12 @@ type Store struct {
 // quedó sin token (corrupto o editado a mano), genera uno nuevo para no dejar
 // el agente sin secreto.
 func Load(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("crear dir de auth: %w", err)
 	}
 	s := &Store{path: path}
 
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path construido internamente desde el data dir de la app; no proviene de input de usuario ni de la red.
 	switch {
 	case os.IsNotExist(err):
 		tok, gerr := generateToken()
@@ -146,7 +146,7 @@ func (s *Store) persistLocked() error {
 	// Escritura atómica con fsync: escribimos a un tmp, lo sincronizamos a disco
 	// y recién ahí renombramos. Ante cualquier fallo limpiamos el tmp.
 	tmp := s.path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- tmp deriva del path interno de auth (s.path + ".tmp"); no proviene de input externo.
 	if err != nil {
 		return fmt.Errorf("escribir auth: %w", err)
 	}

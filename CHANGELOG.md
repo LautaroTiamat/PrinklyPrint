@@ -2,6 +2,21 @@
 
 Todas las versiones notables de PrinklyPrint quedan documentadas acá. Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el proyecto sigue [Semantic Versioning](https://semver.org/lang/es/).
 
+## [1.3.1] — 2026-06-29
+
+### Seguridad
+- **Hardening de permisos de directorio**: los directorios privados que crea el
+  agente (auth, config, `bin` de SumatraPDF) pasan de `0o755` a `0o700`. En
+  Windows —único SO de producción— la protección real la da la DACL de `winfs`;
+  en Unix/CI es lo correcto. Sin cambios de comportamiento.
+- **Análisis estático (gosec) sin ruido**: se anotaron con `// #nosec <regla> --
+  <motivo>` los hallazgos verificados como falsos positivos o comportamiento por
+  diseño (subproceso de SumatraPDF con argumentos validados; lecturas/escrituras
+  de archivos con rutas internas, no input externo; bit de ejecución del binario
+  de SumatraPDF; permisos de directorio del stub no-Windows). La justificación
+  queda **en el código** para que sea auditable, no oculta en la UI del scanner.
+  No se modificó ninguna lógica de seguridad.
+
 ## [1.3.0] — 2026-06-29
 
 Tres cambios pedidos por una revisión de seguridad. No tocan el flujo de

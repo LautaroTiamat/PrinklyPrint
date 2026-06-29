@@ -123,7 +123,7 @@ func EnsureSumatra(binDir string) (string, error) {
 	if len(embedded.SumatraPDF) == 0 {
 		return "", fmt.Errorf("binario de SumatraPDF no embebido — recompilá con -tags with_sumatra")
 	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		return "", fmt.Errorf("crear bin dir: %w", err)
 	}
 	dst := filepath.Join(binDir, "SumatraPDF.exe")
@@ -131,7 +131,7 @@ func EnsureSumatra(binDir string) (string, error) {
 		return dst, nil
 	}
 	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, embedded.SumatraPDF, 0o755); err != nil {
+	if err := os.WriteFile(tmp, embedded.SumatraPDF, 0o755); err != nil { // #nosec G306 -- SumatraPDF.exe es un ejecutable y requiere el bit de ejecución; no es dato sensible (binario público verificado por SHA256 en checksums.txt). En Windows —único SO donde corre— la protección real la da la DACL de winfs.
 		return "", fmt.Errorf("escribir SumatraPDF: %w", err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {

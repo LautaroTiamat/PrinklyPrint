@@ -84,11 +84,11 @@ type Manager struct {
 }
 
 func Load(path string) (*Manager, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("crear dir de config: %w", err)
 	}
 	m := &Manager{path: path, cfg: Defaults()}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path interno de config; no proviene de input externo.
 	switch {
 	case os.IsNotExist(err):
 		if err := m.persistLocked(); err != nil {

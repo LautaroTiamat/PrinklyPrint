@@ -76,7 +76,7 @@ func runSumatra(ctx context.Context, sumatraPath, pdfPath string, opts Options) 
 		return nil, fmt.Errorf("impresión solo soportada en Windows (OS actual: %s)", runtime.GOOS)
 	}
 	args := BuildSumatraArgs(pdfPath, opts)
-	cmd := exec.CommandContext(ctx, sumatraPath, args...)
+	cmd := exec.CommandContext(ctx, sumatraPath, args...) // #nosec G204 -- sin shell (argv separado, sin metacaracteres); sumatraPath es el binario embebido (ruta interna) y los args salen de BuildSumatraArgs con validación estricta (whitelist de page_range, enums cerrados, copies acotado). Sin vector de inyección.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

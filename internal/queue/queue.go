@@ -275,7 +275,7 @@ func (w *Worker) resolvePrintFile(j *store.Job) (path string, cleanup func(), er
 	_ = winfs.Restrict(w.cfg.TempDir)
 
 	tmp := filepath.Join(w.cfg.TempDir, uuid.NewString()+".pdf")
-	if err := os.WriteFile(tmp, plain, 0o600); err != nil {
+	if err := os.WriteFile(tmp, plain, 0o600); err != nil { // #nosec G703 -- el nombre es un UUID generado por el servidor (uuid.NewString()), sin componente controlable por el usuario; filepath.Join lo confina a TempDir (ruta interna). No hay traversal alcanzable.
 		return "", noop, fmt.Errorf("escribir pdf temporal: %w", err)
 	}
 	_ = winfs.Restrict(tmp)

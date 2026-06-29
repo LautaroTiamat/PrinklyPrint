@@ -70,7 +70,7 @@ func (r *FileRotator) rotateLocked() error {
 	}
 	day := time.Now().Format("2006-01-02")
 	name := filepath.Join(r.dir, fmt.Sprintf("%s-%s.log", r.prefix, day))
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- name = dir interno + prefijo + fecha; no proviene de input externo.
 	if err != nil {
 		return fmt.Errorf("abrir log: %w", err)
 	}

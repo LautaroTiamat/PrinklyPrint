@@ -14,7 +14,7 @@ func Restrict(path string) error {
 		return err
 	}
 	if fi.IsDir() {
-		return os.Chmod(path, 0o700)
+		return os.Chmod(path, 0o700) // #nosec G302 -- es un directorio; 0o700 incluye el bit de ejecución necesario para traverse. Stub solo para dev/CI; en producción (Windows) se usa la DACL de winfs_windows.go.
 	}
 	return os.Chmod(path, 0o600)
 }
