@@ -58,27 +58,39 @@ import (
 )
 
 type Config struct {
-	Addr      string
-	Logger    *slog.Logger
-	Store     *store.Store
-	Printer   *printer.Service
-	Queue     *queue.Worker
-	Config    *config.Manager
-	Auth      *auth.Store
-	Prompter  PairingPrompter
-	SecLog    *seclog.Logger // eventos de seguridad → slog + Event Log (C-11/C-12)
-	Version   string
+	Addr    string
+	Logger  *slog.Logger
+	Store   *store.Store
+	Printer *printer.Service
+	Queue   *queue.Worker
+	Config  *config.Manager
+	Auth    *auth.Store
+	Prompter PairingPrompter
+	SecLog   *seclog.Logger // eventos de seguridad → slog + Event Log
+	Version  string
 	MachineID string
+	// AllowAnyOrigin es el valor EFECTIVO del modo "permitir cualquier origen",
+	// calculado al arrancar desde la marca del instalador (internal/insecure), NO
+	// desde config.yaml ni la UI. Es la única fuente que consultan originApproved
+	// y el pairing. Default false (modo seguro).
+	AllowAnyOrigin bool
 }
 
 type Server struct {
 	cfg    Config
 	srv    *http.Server
 	pairMu sync.Mutex // serializa el handshake de pairing (un diálogo a la vez)
+
+	// Rate limit de /pair (opcional, off por default). El bucket se crea perezoso
+	// en el primer /pair con el rate limit activo y se re-deriva si cambian los
+	// valores de config en vivo. NUNCA se aplica a /print.
+	limiterMu   sync.Mutex
+	pairLimiter *tokenBucket
+	now         func() time.Time // reloj inyectable (tests); nil ⇒ time.Now
 }
 
 func New(cfg Config) *Server {
-	s := &Server{cfg: cfg}
+	s := &Server{cfg: cfg, now: time.Now}
 	mux := http.NewServeMux()
 	s.routes(mux)
 	// Orden de middlewares: cors por fuera, requireToken por dentro, mux al

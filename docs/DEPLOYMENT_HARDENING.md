@@ -134,8 +134,8 @@ Flujo:
 
 1. La app web llama a un endpoint sensible sin token → `401`.
 2. La librería cliente llama a `POST /pair`.
-3. Si el origen **ya está** en `allowed_origins` (o `allow_any_origin: true`), el
-   agente devuelve el token **sin diálogo**.
+3. Si el origen **ya está** en `allowed_origins` (o si el modo "permitir cualquier
+   origen" está activo — ver más abajo), el agente devuelve el token **sin diálogo**.
 4. Si es un origen **nuevo**, el agente muestra un **diálogo nativo** al operador
    (por defecto en "denegar"). Al aprobar, el origen se agrega a `allowed_origins`
    y se entrega el token.
@@ -147,13 +147,51 @@ internos agregándolos a `allowed_origins` antes de desplegar (o corré el agent
 en modo interactivo una vez para aprobarlos). En headless, un origen no
 pre-aprobado recibe `403 pairing_denied`.
 
-`allow_any_origin: true` desactiva el diálogo para **todos** los orígenes (el
-token sigue siendo obligatorio). Usalo solo si entendés el trade-off; en general,
-preferí una lista explícita de `allowed_origins`.
+### Modo "permitir cualquier origen" (solo por instalador)
+
+Existe un modo que desactiva el diálogo para **todos** los orígenes (el token
+sigue siendo obligatorio). Es **inseguro** y por eso **solo se habilita al
+instalar**, no en runtime:
+
+- **No** está en `config.yaml` ni en la UI (la UI lo muestra como **solo lectura**).
+  Editar el yaml a mano no lo activa.
+- La única fuente de verdad es una marca en el registro
+  **`HKLM\Software\PrinklyPrint\AllowAnyOrigin`** (DWORD = 1), que solo un proceso
+  elevado (el instalador) puede escribir. Un usuario estándar no puede tocar HKLM.
+- Se habilita marcando la opción **"Permitir cualquier origen CORS (NO
+  recomendado)"** en el instalador, o en instalación silenciosa/GPO con
+  `PrinklyPrint-Setup.exe /VERYSILENT /ALLOWANYORIGIN=1`. El desinstalador limpia
+  la marca; reinstalar sin la opción la desactiva.
+- Si el agente arranca con este modo activo, emite un evento de seguridad
+  **WARNING** al Event Log/SIEM (`insecure_mode_enabled`) para que quede
+  registrado que el equipo corre en modo inseguro.
+
+En general **no lo uses**: preferí una lista explícita de `allowed_origins`. Solo
+tiene sentido en entornos de prueba acotados.
 
 ---
 
-## 6. Checklist de despliegue endurecido
+## 6. Rate limit de `POST /pair` (opcional, apagado por default)
+
+El pareo (`POST /pair`) puede limitarse por tasa para mitigar intentos de fuerza
+bruta, **sin tocar la impresión**:
+
+- **Apagado por default.** Se activa desde la UI (pestaña General → "Límite de
+  intentos de pareo") o en `config.yaml`:
+  `pair_rate_limit_enabled` (bool), `pair_rate_limit_per_minute` (tasa sostenida,
+  default 30), `pair_rate_limit_burst` (capacidad de ráfaga, default 10). Los
+  valores se leen en vivo (no requieren reiniciar).
+- Algoritmo **token bucket** (tasa + burst): tolera ráfagas legítimas y modera el
+  ritmo sostenido. Al superarse, `/pair` responde `429 rate_limited` con
+  `Retry-After`, y se registra un evento de seguridad en el SIEM.
+- **No aplica a `/print`** (a propósito): la impresión ya está acotada por el
+  límite de tamaño de body (50 MB) y la profundidad máxima de cola. El rate limit
+  es exclusivo del pareo, que se llama una vez por origen (no por impresión), así
+  que limitarlo no afecta el flujo de impresión productiva.
+
+---
+
+## 7. Checklist de despliegue endurecido
 
 - [ ] Instalar con el instalador firmado, como administrador.
 - [ ] CA interna desplegada por GPO (si se firma con CA propia).

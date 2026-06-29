@@ -15,7 +15,7 @@ import (
 	"github.com/lautarotiamat/prinklyprint/internal/store"
 )
 
-// Límites de validación de entrada para /print (control C-20).
+// Límites de validación de entrada para /print.
 const (
 	maxCopies        = 999
 	maxMetadataBytes = 16 << 10 // 16 KB
@@ -125,11 +125,12 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
+	// /ping NO exige token: por eso devolvemos lo mínimo (liveness). machine_id NO
+	// va acá — se expone solo en /settings, que sí exige token (ver handleGetSettings).
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"version":    s.cfg.Version,
-		"machine_id": s.cfg.MachineID,
-		"paused":     s.cfg.Queue.IsPaused(),
+		"ok":      true,
+		"version": s.cfg.Version,
+		"paused":  s.cfg.Queue.IsPaused(),
 	})
 }
 
@@ -154,6 +155,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"duplex":           c.Duplex,
 		"scale":            c.Scale,
 		"paused":           c.Paused,
+		// machine_id se expone solo acá (endpoint autenticado), ya no en /ping.
+		"machine_id": s.cfg.MachineID,
 	})
 }
 
@@ -243,7 +246,7 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	// Evento de seguridad (C-11/C-12): qué se encoló y desde qué origen.
+	// Evento de seguridad: qué se encoló y desde qué origen.
 	s.cfg.SecLog.PrintEnqueued(id, req.Filename, r.Header.Get("Origin"))
 	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": id, "status": "queued"})
 }
@@ -252,7 +255,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
-	// Bounds de paginación (C-20): limit en 1..500 (default 100), offset >= 0.
+	// Bounds de paginación: limit en 1..500 (default 100), offset >= 0.
 	if limit <= 0 {
 		limit = 100
 	}

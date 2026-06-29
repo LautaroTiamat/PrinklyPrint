@@ -31,6 +31,26 @@ func TestConfigValidate(t *testing.T) {
 		{"duplex inválido", func(c *Config) { c.Duplex = "triple" }, true},
 		{"scale inválido", func(c *Config) { c.Scale = "huge" }, true},
 		{"language inválido", func(c *Config) { c.Language = "fr" }, true},
+		{"rate limit off con ceros (no valida)", func(c *Config) {
+			c.PairRateLimitEnabled = false
+			c.PairRateLimitPerMinute = 0
+			c.PairRateLimitBurst = 0
+		}, false},
+		{"rate limit on válido", func(c *Config) {
+			c.PairRateLimitEnabled = true
+			c.PairRateLimitPerMinute = 30
+			c.PairRateLimitBurst = 10
+		}, false},
+		{"rate limit on con per_min 0", func(c *Config) {
+			c.PairRateLimitEnabled = true
+			c.PairRateLimitPerMinute = 0
+			c.PairRateLimitBurst = 10
+		}, true},
+		{"rate limit on con burst 0", func(c *Config) {
+			c.PairRateLimitEnabled = true
+			c.PairRateLimitPerMinute = 30
+			c.PairRateLimitBurst = 0
+		}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

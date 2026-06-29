@@ -11,12 +11,13 @@ el token de instalación (ver más abajo cómo obtenerlo).
 
 ## 1. Verificar salud
 
-`GET /ping` está **exento de token** y sirve de liveness. Expone solo metadata no
-sensible: `ok`, `version`, `machine_id`, `paused`.
+`GET /ping` está **exento de token** y sirve de liveness. Expone lo mínimo:
+`ok`, `version`, `paused`. (El `machine_id` ya **no** va en `/ping`; se obtiene
+desde `GET /settings`, que exige token.)
 
 ```powershell
 Invoke-RestMethod -Uri "http://127.0.0.1:17777/ping"
-# -> ok=True; version=...; machine_id=...; paused=False
+# -> ok=True; version=...; paused=False
 ```
 
 - Si responde: el agente está corriendo.

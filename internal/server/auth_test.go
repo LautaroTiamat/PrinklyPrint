@@ -424,12 +424,11 @@ func TestPair_NilPrompterReturns403(t *testing.T) {
 
 func TestPair_AllowAnyOriginReturnsTokenWithoutDialog(t *testing.T) {
 	store := testAuth(t)
-	cm := testConfig(t)
-	if err := cm.Update(func(c *config.Config) { c.AllowAnyOrigin = true }); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
 	p := &fakePrompter{interactive: true}
-	s := newPairServer(store, cm, p)
+	s := newPairServer(store, testConfig(t), p)
+	// El modo "permitir cualquier origen" YA NO viene del config.yaml: es el valor
+	// EFECTIVO que el server recibe de la marca del instalador. Lo simulamos acá.
+	s.cfg.AllowAnyOrigin = true
 
 	rec := doPair(s, "https://cualquiera.example")
 	if rec.Code != http.StatusOK {

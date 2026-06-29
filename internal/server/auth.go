@@ -66,7 +66,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			if !ok {
 				reason = "token faltante o mal formado"
 			}
-			// Evento de seguridad (C-11/C-12): el gap principal eran los 401
+			// Evento de seguridad: el gap principal eran los 401
 			// invisibles. NUNCA logueamos el valor del token.
 			s.cfg.SecLog.AuthFailure(r.URL.Path, origin, reason, origin != "")
 			writeErr(w, http.StatusUnauthorized, "unauthorized",
@@ -107,7 +107,10 @@ func (s *Server) originApproved(origin string) bool {
 		return false
 	}
 	cfg := s.cfg.Config.Get()
-	return cfg.AllowAnyOrigin || isAllowedOrigin(origin, cfg.AllowedOrigins)
+	// allow-any-origin viene de la marca del instalador (s.cfg.AllowAnyOrigin), NO
+	// del config.yaml: un operador no puede reactivarlo editando el yaml ni desde
+	// la UI. Ver internal/insecure y server.Config.AllowAnyOrigin.
+	return s.cfg.AllowAnyOrigin || isAllowedOrigin(origin, cfg.AllowedOrigins)
 }
 
 // approveOrigin agrega el origen a la lista de orígenes permitidos (config),
@@ -123,9 +126,46 @@ func (s *Server) approveOrigin(origin string) error {
 	})
 }
 
+// pairRateLimited aplica el rate limit de /pair SI está activo en la config.
+// Devuelve true (y ya respondió 429 + Retry-After) cuando el request debe
+// rechazarse. El bucket es GLOBAL (en loopback todo el tráfico viene de
+// 127.0.0.1, así que per-origin no aporta) y se lee/re-deriva en vivo desde la
+// config. Apagado por default ⇒ siempre devuelve false (comportamiento intacto).
+// NUNCA se aplica a /print.
+func (s *Server) pairRateLimited(w http.ResponseWriter, r *http.Request) bool {
+	cfg := s.cfg.Config.Get()
+	if !cfg.PairRateLimitEnabled {
+		return false
+	}
+	s.limiterMu.Lock()
+	if s.pairLimiter == nil {
+		s.pairLimiter = newTokenBucket(cfg.PairRateLimitPerMinute, cfg.PairRateLimitBurst, s.now)
+	} else {
+		s.pairLimiter.reconfigure(cfg.PairRateLimitPerMinute, cfg.PairRateLimitBurst)
+	}
+	limiter := s.pairLimiter
+	s.limiterMu.Unlock()
+
+	if limiter.allow() {
+		return false
+	}
+	// Limitado: evento de seguridad para trazar intentos de fuerza bruta de
+	// pairing en el SIEM. NUNCA se loguea el token.
+	s.cfg.SecLog.PairingDenied(r.Header.Get("Origin"), "rate_limited")
+	w.Header().Set("Retry-After", "5")
+	writeErr(w, http.StatusTooManyRequests, "rate_limited",
+		"demasiados intentos de pareo; reintentá en unos segundos")
+	return true
+}
+
 // handlePair implementa el handshake de pairing. Ver el contrato de cable en
 // el README / CHANGELOG. Devuelve 200 {"token":...} o 403 pairing_denied.
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
+	// Rate limit opcional, SOLO de /pair (off por default). Va al principio: antes
+	// de leer el body, tomar s.pairMu o mostrar cualquier diálogo.
+	if s.pairRateLimited(w, r) {
+		return
+	}
 	if s.cfg.Auth == nil {
 		writeErr(w, http.StatusServiceUnavailable, "pairing_unavailable",
 			"el almacén de autenticación no está inicializado")

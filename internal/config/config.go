@@ -31,19 +31,29 @@ type Config struct {
 	Language       string   `yaml:"language" json:"language"`
 	Port           int      `yaml:"port" json:"port"`
 	AllowedOrigins []string `yaml:"allowed_origins" json:"allowed_origins"`
-	AllowAnyOrigin bool     `yaml:"allow_any_origin" json:"allow_any_origin"`
-	MaxRetries     int      `yaml:"max_retries" json:"max_retries"`
-	RetentionDays  int      `yaml:"retention_days" json:"retention_days"`
-	Paused         bool     `yaml:"paused" json:"paused"`
-	AutoStart      bool     `yaml:"auto_start" json:"auto_start"`
-	DefaultPrinter string   `yaml:"default_printer" json:"default_printer"`
-	PaperSize      string   `yaml:"paper_size" json:"paper_size"`
-	CustomWidthMM  float64  `yaml:"custom_width_mm" json:"custom_width_mm"`
-	CustomHeightMM float64  `yaml:"custom_height_mm" json:"custom_height_mm"`
-	Orientation    string   `yaml:"orientation" json:"orientation"`
-	Color          bool     `yaml:"color" json:"color"`
-	Duplex         string   `yaml:"duplex" json:"duplex"`
-	Scale          string   `yaml:"scale" json:"scale"`
+	// NOTA: el modo "permitir cualquier origen" (allow_any_origin) YA NO vive en
+	// el config.yaml ni se activa desde la UI. Es una marca controlada solo por el
+	// instalador (HKLM, ver internal/insecure) que el server lee al arrancar. Así
+	// un operador no puede activar por error un modo inseguro editando el yaml.
+	MaxRetries     int     `yaml:"max_retries" json:"max_retries"`
+	RetentionDays  int     `yaml:"retention_days" json:"retention_days"`
+	Paused         bool    `yaml:"paused" json:"paused"`
+	AutoStart      bool    `yaml:"auto_start" json:"auto_start"`
+	DefaultPrinter string  `yaml:"default_printer" json:"default_printer"`
+	PaperSize      string  `yaml:"paper_size" json:"paper_size"`
+	CustomWidthMM  float64 `yaml:"custom_width_mm" json:"custom_width_mm"`
+	CustomHeightMM float64 `yaml:"custom_height_mm" json:"custom_height_mm"`
+	Orientation    string  `yaml:"orientation" json:"orientation"`
+	Color          bool    `yaml:"color" json:"color"`
+	Duplex         string  `yaml:"duplex" json:"duplex"`
+	Scale          string  `yaml:"scale" json:"scale"`
+
+	// Rate limit de POST /pair (abuse-protection del pareo). Apagado por default.
+	// NO afecta la impresión: /print tiene sus propios límites (tamaño de body y
+	// profundidad de cola) y nunca pasa por este limitador.
+	PairRateLimitEnabled   bool `yaml:"pair_rate_limit_enabled" json:"pair_rate_limit_enabled"`
+	PairRateLimitPerMinute int  `yaml:"pair_rate_limit_per_minute" json:"pair_rate_limit_per_minute"`
+	PairRateLimitBurst     int  `yaml:"pair_rate_limit_burst" json:"pair_rate_limit_burst"`
 }
 
 func Defaults() Config {
@@ -51,7 +61,6 @@ func Defaults() Config {
 		Language:       locale.Detect(SupportedLanguages, "en"),
 		Port:           17777,
 		AllowedOrigins: []string{},
-		AllowAnyOrigin: false,
 		MaxRetries:     1,
 		RetentionDays:  7,
 		Paused:         false,
@@ -61,6 +70,10 @@ func Defaults() Config {
 		Color:          true,
 		Duplex:         "none",
 		Scale:          "fit",
+		// Rate limit de /pair: apagado por default; valores usados solo si se activa.
+		PairRateLimitEnabled:   false,
+		PairRateLimitPerMinute: 30,
+		PairRateLimitBurst:     10,
 	}
 }
 
@@ -170,6 +183,13 @@ func mergeDefaults(c Config) Config {
 	if c.AllowedOrigins == nil {
 		c.AllowedOrigins = []string{}
 	}
+	// Defaults del rate limit de /pair para configs viejos (sin estos campos).
+	if c.PairRateLimitPerMinute == 0 {
+		c.PairRateLimitPerMinute = d.PairRateLimitPerMinute
+	}
+	if c.PairRateLimitBurst == 0 {
+		c.PairRateLimitBurst = d.PairRateLimitBurst
+	}
 	return c
 }
 
@@ -202,6 +222,15 @@ func validate(c Config) error {
 	case "es", "en", "pt":
 	default:
 		return fmt.Errorf("language inválido: %s", c.Language)
+	}
+	// Si el rate limit de /pair está activo, tasa y burst deben ser positivos.
+	if c.PairRateLimitEnabled {
+		if c.PairRateLimitPerMinute <= 0 {
+			return fmt.Errorf("pair_rate_limit_per_minute debe ser > 0 cuando el rate limit está activo: %d", c.PairRateLimitPerMinute)
+		}
+		if c.PairRateLimitBurst <= 0 {
+			return fmt.Errorf("pair_rate_limit_burst debe ser > 0 cuando el rate limit está activo: %d", c.PairRateLimitBurst)
+		}
 	}
 	return nil
 }

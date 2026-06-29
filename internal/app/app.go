@@ -35,6 +35,7 @@ import (
 	"github.com/lautarotiamat/prinklyprint/internal/autostart"
 	"github.com/lautarotiamat/prinklyprint/internal/config"
 	"github.com/lautarotiamat/prinklyprint/internal/i18n"
+	"github.com/lautarotiamat/prinklyprint/internal/insecure"
 	"github.com/lautarotiamat/prinklyprint/internal/logging"
 	"github.com/lautarotiamat/prinklyprint/internal/printer"
 	"github.com/lautarotiamat/prinklyprint/internal/queue"
@@ -66,6 +67,7 @@ type App struct {
 	server    *server.Server
 	secLog    *seclog.Logger
 	machineID string
+	allowAny  bool // modo "permitir cualquier origen" efectivo (marca del instalador)
 	shutdown  chan struct{}
 }
 
@@ -146,6 +148,15 @@ func New(opts Options) (*App, error) {
 	}
 	secLog := seclog.New(logger.With("module", "seclog"), secSink)
 
+	// Modo "permitir cualquier origen": SOLO se habilita desde el instalador
+	// (marca en HKLM, ver internal/insecure). No es editable en runtime ni desde
+	// la UI ni desde config.yaml. Si está activo, lo avisamos al SIEM (WARNING).
+	allowAny := insecure.AllowAnyOrigin()
+	if allowAny {
+		secLog.InsecureMode("allow_any_origin")
+		logger.Warn("MODO INSEGURO activo: 'permitir cualquier origen' habilitado por el instalador (HKLM)")
+	}
+
 	printerSvc := printer.NewService(sumatraPath, logger.With("module", "printer"))
 	q := queue.New(queue.Config{
 		Store:         st,
@@ -175,17 +186,18 @@ func New(opts Options) (*App, error) {
 		Printer:   printerSvc,
 		Queue:     q,
 		Config:    cfg,
-		Auth:      authStore,
-		Prompter:  prompter,
-		SecLog:    secLog,
-		Version:   opts.Version,
-		MachineID: mid,
+		Auth:           authStore,
+		Prompter:       prompter,
+		SecLog:         secLog,
+		Version:        opts.Version,
+		MachineID:      mid,
+		AllowAnyOrigin: allowAny,
 	})
 
 	return &App{
 		opts: opts, dataDir: dataDir, logger: logger, logCloser: closer,
 		cfg: cfg, store: st, printer: printerSvc, queue: q, server: srv,
-		secLog: secLog, machineID: mid, shutdown: make(chan struct{}),
+		secLog: secLog, machineID: mid, allowAny: allowAny, shutdown: make(chan struct{}),
 	}, nil
 }
 

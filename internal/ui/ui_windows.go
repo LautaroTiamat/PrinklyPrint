@@ -37,8 +37,14 @@ type Window struct {
 	DataDir   string
 	Version   string
 	MachineID string
+	// AllowAnyOrigin es el valor EFECTIVO (marca del instalador). La UI lo muestra
+	// como estado de solo lectura; no se puede cambiar desde acá.
+	AllowAnyOrigin bool
 
 	OnShutdown func()
+	// OnSettingsChanged, si no es nil, se invoca cuando el operador cambia un
+	// setting desde la UI (lo usamos para emitir el evento de seguridad al SIEM).
+	OnSettingsChanged func(detail string)
 
 	mw            *walk.MainWindow
 	tabWidget     *walk.TabWidget
@@ -62,13 +68,15 @@ func (w *Window) Run(ctx context.Context) error {
 	w.queueTab = NewQueueTab(w.Store, w.currentLang)
 	w.printTab = NewPrintSettingsTab(w.Config, w.Printer, w.Queue, w.currentLang)
 	w.generalTab = NewGeneralTab(generalDeps{
-		cfg:          w.Config,
-		lang:         w.currentLang,
-		version:      w.Version,
-		machineID:    w.MachineID,
-		dataDir:      w.DataDir,
-		onShutdown:   w.OnShutdown,
-		onLangChange: func(l i18n.Lang) { w.applyLanguage(l) },
+		cfg:               w.Config,
+		lang:              w.currentLang,
+		version:           w.Version,
+		machineID:         w.MachineID,
+		dataDir:           w.DataDir,
+		allowAny:          w.AllowAnyOrigin,
+		onShutdown:        w.OnShutdown,
+		onLangChange:      func(l i18n.Lang) { w.applyLanguage(l) },
+		onSettingsChanged: w.OnSettingsChanged,
 	})
 
 	// El ícono aparece en barra de título, taskbar y Alt+Tab. Si la decodificación

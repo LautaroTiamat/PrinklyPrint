@@ -2,6 +2,45 @@
 
 Todas las versiones notables de PrinklyPrint quedan documentadas acá. Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el proyecto sigue [Semantic Versioning](https://semver.org/lang/es/).
 
+## [1.3.0] — 2026-06-29
+
+Tres cambios pedidos por una revisión de seguridad. No tocan el flujo de
+impresión (`/print`, cola, ritmo) ni la lógica de auth/pairing/token.
+
+### Agregado
+- **Rate limit opcional de `POST /pair`** (apagado por default). Token bucket
+  (tasa sostenida + ráfaga) **global** para `/pair`; al superarse responde
+  `429 rate_limited` con header `Retry-After`. Configurable desde la UI (pestaña
+  General) o el `config.yaml` (`pair_rate_limit_enabled` / `pair_rate_limit_per_minute`
+  / `pair_rate_limit_burst`), con lectura en vivo. **No afecta la impresión**:
+  `/print` tiene sus propios límites (tamaño de body y profundidad de cola) y
+  nunca pasa por este limitador. Un rechazo se registra en el SIEM
+  (`pairing_denied`, reason `rate_limited`).
+
+### Cambiado
+- **`allow_any_origin` solo se habilita desde el instalador.** El modo "permitir
+  cualquier origen" (CORS permisivo que entrega el token sin diálogo) dejó de
+  poder activarse en runtime: ya no vive en `config.yaml` ni en la UI. La única
+  fuente de verdad es una marca en el registro (`HKLM\Software\PrinklyPrint\AllowAnyOrigin`),
+  escribible solo por un proceso elevado (el instalador). La UI muestra el estado
+  como **solo lectura** (con advertencia si está ACTIVADO). Si el agente arranca
+  con el modo activo, emite un evento de seguridad WARNING (`insecure_mode_enabled`)
+  al Event Log/SIEM.
+- **`GET /ping` ya no expone `machine_id`.** El healthcheck sin token ahora
+  devuelve solo `{ok, version, paused}`. `machine_id` se obtiene desde
+  `GET /settings`, que exige token.
+
+### Seguridad
+- Reduce la superficie del endpoint sin autenticación (`/ping`) y elimina la
+  posibilidad de activar por error un modo CORS inseguro en runtime. El rate
+  limit de `/pair` agrega protección contra fuerza bruta del pareo sin tocar el
+  flujo de impresión.
+
+### Instalador
+- Nueva opción **"Permitir cualquier origen CORS (NO recomendado)"** (desmarcada
+  por default) que escribe la marca en HKLM. Soporta instalación silenciosa/GPO
+  con `/ALLOWANYORIGIN=1`. El desinstalador limpia la marca.
+
 ## [1.2.1] — 2026-06-29
 
 ### Corregido
@@ -11,7 +50,7 @@ Todas las versiones notables de PrinklyPrint quedan documentadas acá. Formato b
 
 ## [1.2.0] — 2026-06-29
 
-Endurecimiento de seguridad en dos frentes: la **cadena de suministro** del pipeline de build/release (con evidencia auditable) y el **agente** en sí, cerrando tres brechas del informe — datos en reposo sin cifrar, validación de entrada incompleta y logging no integrado a SIEM.
+Endurecimiento de seguridad en dos frentes: la **cadena de suministro** del pipeline de build/release (con evidencia auditable) y el **agente** en sí, cerrando tres brechas de seguridad — datos en reposo sin cifrar, validación de entrada incompleta y logging no integrado a SIEM.
 
 ### Agregado
 - **Escaneos de seguridad continuos** ([`.github/workflows/security.yml`](.github/workflows/security.yml), en push/PR a main + semanal): **govulncheck** (SCA), **gosec** (SAST → SARIF), **CodeQL** (SAST, `build-mode: none`) y **gitleaks** (secretos).
@@ -43,7 +82,7 @@ Endurecimiento de seguridad en dos frentes: la **cadena de suministro** del pipe
 - **BREAKING — se eliminó `pdf_url` de `POST /print`.** El agente ya no descarga PDFs desde una URL remota: los PDF se generan en el cliente y se mandan **siempre** inline en `pdf_base64` (único camino). Se quitaron el campo `pdf_url` del request, la función de descarga (`downloadPDF`) y el cliente HTTP saliente del worker. Un body con `pdf_url` se ignora (campo desconocido) y, al faltar `pdf_base64`, devuelve `400 bad_request`. **Migración**: si alguna integración mandaba `pdf_url`, ahora debe descargar/generar el PDF de su lado y enviarlo en `pdf_base64`.
 
 ### Seguridad
-- Cierra las brechas del informe de auditoría: integridad de pipeline, integridad de artefactos / OWASP A08 (firma + provenance + verificación de hash), SBOM, pruebas de seguridad, gestión de vulnerabilidades (govulncheck + Dependabot + bump de Go), **datos en reposo (cifrado DPAPI + ACL owner-only), validación de entrada y logging/SIEM**.
+- Cierra varias brechas de seguridad: integridad de pipeline, integridad de artefactos / OWASP A08 (firma + provenance + verificación de hash), SBOM, pruebas de seguridad, gestión de vulnerabilidades (govulncheck + Dependabot + bump de Go), **datos en reposo (cifrado DPAPI + ACL owner-only), validación de entrada y logging/SIEM**.
 - **SSRF eliminado de raíz**: al quitar `pdf_url` (ver *Eliminado*), el agente no realiza ninguna conexión saliente de red. Además, como esa era la única rama que escribía PDFs en claro, el **cifrado en reposo de los PDFs queda completo** (ya no hay PDFs sin cifrar en disco).
 - **Requiere configurar en Settings del repo** (no alcanza con los workflows): branch protection con required status checks, code scanning como required, y secret scanning + push protection. Ver README → *Seguridad de la cadena de suministro*.
 - **Nuevos secrets para firmar** (opcionales para builds de prueba, obligatorios para el release de producción): `WINDOWS_CERT_PFX_BASE64` + `WINDOWS_CERT_PASSWORD`, o `SIGN_COMMAND`. Ver README.

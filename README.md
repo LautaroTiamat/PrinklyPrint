@@ -117,7 +117,7 @@ await fetch('http://127.0.0.1:17777/print', {
 
 | Método | Endpoint | Token | Qué hace |
 |--------|----------|:-----:|----------|
-| `GET`  | `/ping` | — | Healthcheck. Devuelve `{ok, version, machine_id, paused}`. |
+| `GET`  | `/ping` | — | Healthcheck (sin token). Devuelve `{ok, version, paused}`. `machine_id` se obtiene en `/settings` (con token). |
 | `POST` | `/pair` | — | Handshake de pairing. Devuelve `{token}` (200) o `{error:"pairing_denied"}` (403). Body opcional: `{label}`. |
 | `GET`  | `/printers` | ✔ | Lista impresoras del sistema con estado. |
 | `GET`  | `/settings` | ✔ | Defaults de impresión configurados. |
@@ -311,7 +311,7 @@ Para que los chequeos **bloqueen** merges y se cierre el control de gestión de 
 
 ---
 
-## 🔒 Datos en reposo, validación y auditoría
+## 🔒 Datos en reposo, validación y eventos de seguridad
 
 ### Cifrado de PDFs en reposo (DPAPI)
 

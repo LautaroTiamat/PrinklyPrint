@@ -2,7 +2,7 @@
 //
 //   - el slog de archivo del agente (complementario, local), y
 //   - el Windows Event Log (canal "Application", source "PrinklyPrint"), que es
-//     lo que un SIEM corporativo recolecta de forma centralizada (C-11/C-12).
+//     lo que un SIEM corporativo recolecta de forma centralizada.
 //
 // Los eventos tienen IDs estables para correlación en el SIEM. NUNCA se loguea
 // el valor del token ni el contenido de los PDFs.
@@ -39,6 +39,7 @@ const (
 	IDPrintEnqueued   uint32 = 1004 // se encoló un job de impresión
 	IDSettingsChanged uint32 = 1005 // cambió la configuración del agente
 	IDTokenRotated    uint32 = 1006 // se rotó el token de la instalación
+	IDInsecureMode    uint32 = 1007 // el agente arrancó con un modo inseguro activo
 )
 
 // Sink es el destino nativo de eventos (Windows Event Log). Inyectable para tests.
@@ -171,6 +172,13 @@ func (l *Logger) SettingsChanged(detail string) {
 // TokenRotated: se regeneró el token de la instalación (invalida los cacheados).
 func (l *Logger) TokenRotated() {
 	l.emit(LevelWarning, IDTokenRotated, "token_rotated", "token de la instalación rotado")
+}
+
+// InsecureMode: el agente arrancó con un modo inseguro habilitado por el
+// instalador (p. ej. "permitir cualquier origen"). detail describe cuál. Queda
+// como WARNING en el SIEM para que sea visible que el equipo corre así.
+func (l *Logger) InsecureMode(detail string) {
+	l.emit(LevelWarning, IDInsecureMode, "insecure_mode_enabled", "modo inseguro habilitado", "detail", detail)
 }
 
 func boolStr(b bool) string {

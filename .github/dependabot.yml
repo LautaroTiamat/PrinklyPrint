@@ -1,6 +1,6 @@
 # Dependabot mantiene al día (de forma controlada, vía PRs) los pins que
 # fijamos para endurecer la cadena de suministro. Es evidencia de gestión de
-# vulnerabilidades continua (controles C-09 / C-10 del informe).
+# vulnerabilidades continua.
 version: 2
 updates:
   # GitHub Actions pineadas por SHA en los workflows (release.yml, security.yml).

@@ -73,6 +73,10 @@ Name: "portuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "autostart"; Description: "Iniciar {#MyAppName} cuando inicie Windows"; GroupDescription: "Inicio del sistema:"
+; Modo INSEGURO "permitir cualquier origen CORS": desmarcado por default. Si se
+; marca, /pair entrega el token a CUALQUIER origen sin diálogo de aprobación. Es
+; la unica forma de habilitarlo (no se puede desde la UI ni el config.yaml).
+Name: "allowanyorigin"; Description: "Permitir cualquier origen CORS (NO recomendado; solo entornos de prueba)"; GroupDescription: "Seguridad:"; Flags: unchecked
 
 [Files]
 Source: "..\dist\prinklyprint.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -91,6 +95,17 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueType: string; ValueName: "PrinklyPrint"; ValueData: """{app}\{#MyAppExeName}"""; \
   Flags: uninsdeletevalue; Tasks: autostart
 
+; Marca del modo INSEGURO "permitir cualquier origen". En HKLM porque solo
+; un proceso elevado (este instalador) puede escribir ahí; un usuario estándar no.
+; Es la UNICA fuente de verdad del modo: el agente la lee de HKLM al arrancar.
+; Se escribe solo si el operador marcó la task o pasó /ALLOWANYORIGIN=1 (silencioso/GPO).
+Root: HKLM; Subkey: "Software\PrinklyPrint"; ValueType: dword; ValueName: "AllowAnyOrigin"; \
+  ValueData: "1"; Flags: uninsdeletevalue; Check: WantAllowAnyOrigin
+; Si NO se eligió el modo (instalación normal, o upgrade que lo desmarca), borramos
+; cualquier marca previa: queda DESACTIVADO.
+Root: HKLM; Subkey: "Software\PrinklyPrint"; ValueType: none; ValueName: "AllowAnyOrigin"; \
+  Flags: deletevalue; Check: NotWantAllowAnyOrigin
+
 [Run]
 ; Registra el source del Windows Event Log (requiere admin; el instalador ya
 ; corre elevado). Habilita los eventos de seguridad que recolecta el SIEM.
@@ -108,3 +123,21 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-eventlog"; \
 Filename: "reg.exe"; \
   Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v PrinklyPrint /f"; \
   Flags: runhidden; RunOnceId: "DelAutostartReg"
+
+[Code]
+// WantAllowAnyOrigin decide si se escribe la marca del modo inseguro en HKLM.
+// True si el operador marcó la task "allowanyorigin" en el asistente, o si pasó
+// /ALLOWANYORIGIN=1 en una instalación silenciosa / por GPO, p. ej.:
+//   PrinklyPrint-Setup.exe /VERYSILENT /ALLOWANYORIGIN=1
+function WantAllowAnyOrigin(): Boolean;
+begin
+  Result := WizardIsTaskSelected('allowanyorigin') or (ExpandConstant('{param:ALLOWANYORIGIN|0}') = '1');
+end;
+
+// NotWantAllowAnyOrigin: complemento, usado en el Check que BORRA la marca cuando
+// no se eligió el modo (función explícita en vez de "not ..." en el Check, por
+// portabilidad entre versiones de Inno).
+function NotWantAllowAnyOrigin(): Boolean;
+begin
+  Result := not WantAllowAnyOrigin();
+end;

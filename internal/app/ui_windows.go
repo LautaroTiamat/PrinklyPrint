@@ -12,15 +12,19 @@ import (
 // runUI arranca el tray + ventana nativa Win32.
 func (a *App) runUI(ctx context.Context) error {
 	win := &ui.Window{
-		Store:      a.store,
-		Config:     a.cfg,
-		Printer:    a.printer,
-		Queue:      a.queue,
-		Logger:     a.logger.With("module", "ui"),
-		DataDir:    a.dataDir,
-		Version:    a.opts.Version,
-		MachineID:  a.machineID,
-		OnShutdown: a.RequestShutdown,
+		Store:          a.store,
+		Config:         a.cfg,
+		Printer:        a.printer,
+		Queue:          a.queue,
+		Logger:         a.logger.With("module", "ui"),
+		DataDir:        a.dataDir,
+		Version:        a.opts.Version,
+		MachineID:      a.machineID,
+		AllowAnyOrigin: a.allowAny,
+		OnShutdown:     a.RequestShutdown,
+		OnSettingsChanged: func(detail string) {
+			a.secLog.SettingsChanged(detail)
+		},
 	}
 
 	hooks := tray.Hooks{

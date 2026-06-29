@@ -26,6 +26,7 @@
 package ui
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 
@@ -42,8 +43,12 @@ type generalDeps struct {
 	version      string
 	machineID    string
 	dataDir      string
+	allowAny     bool                // estado efectivo del modo inseguro (solo lectura)
 	onShutdown   func()
 	onLangChange func(i18n.Lang)
+	// onSettingsChanged, si no es nil, se llama cuando el operador cambia un
+	// setting desde la UI (lo usamos para emitir el evento de seguridad al SIEM).
+	onSettingsChanged func(detail string)
 }
 
 type GeneralTab struct {
@@ -54,10 +59,12 @@ type GeneralTab struct {
 	originsList    *walk.ListBox
 	originsModel   *originsModel
 	newOriginEdit  *walk.LineEdit
-	allowAnyCheck  *walk.CheckBox
 	autostartCheck *walk.CheckBox
 	maxRetriesEdit *walk.NumberEdit
 	retentionEdit  *walk.NumberEdit
+	pairRateCheck  *walk.CheckBox
+	pairRatePerMin *walk.NumberEdit
+	pairRateBurst  *walk.NumberEdit
 }
 
 func NewGeneralTab(d generalDeps) *GeneralTab {
@@ -195,14 +202,60 @@ func (g *GeneralTab) Page() TabPage {
 						},
 					},
 					ListBox{AssignTo: &g.originsList, Model: g.originsModel, MinSize: Size{Height: 100}},
+					// "Permitir cualquier origen" YA NO es un toggle de la UI: lo
+					// controla el instalador (marca en HKLM). Acá solo mostramos el
+					// estado efectivo, de solo lectura, con énfasis si está ACTIVADO.
+					Label{
+						Text:      g.allowAnyStatusText(),
+						TextColor: g.allowAnyStatusColor(),
+					},
+				},
+			},
+			GroupBox{
+				Title:  "⏱️  " + i18n.T(g.d.lang, "gen.pair_rate_title"),
+				Layout: VBox{Margins: Margins{Left: 12, Top: 12, Right: 12, Bottom: 12}, Spacing: 8},
+				Children: []Widget{
 					CheckBox{
-						AssignTo: &g.allowAnyCheck,
-						Text:     i18n.T(g.d.lang, "gen.cors_allow_any"),
-						Checked:  c.AllowAnyOrigin,
+						AssignTo: &g.pairRateCheck,
+						Text:     i18n.T(g.d.lang, "gen.pair_rate_enable"),
+						Checked:  c.PairRateLimitEnabled,
 						OnCheckedChanged: func() {
-							_ = g.d.cfg.Update(func(c *config.Config) { c.AllowAnyOrigin = g.allowAnyCheck.Checked() })
+							on := g.pairRateCheck.Checked()
+							_ = g.d.cfg.Update(func(c *config.Config) { c.PairRateLimitEnabled = on })
+							if g.pairRatePerMin != nil {
+								g.pairRatePerMin.SetEnabled(on)
+							}
+							if g.pairRateBurst != nil {
+								g.pairRateBurst.SetEnabled(on)
+							}
+							g.notifySettings("pair_rate_limit_enabled")
 						},
 					},
+					Composite{
+						Layout: HBox{MarginsZero: true, Spacing: 8},
+						Children: []Widget{
+							Label{Text: i18n.T(g.d.lang, "gen.pair_rate_per_min")},
+							NumberEdit{
+								AssignTo: &g.pairRatePerMin,
+								Value:    float64(c.PairRateLimitPerMinute),
+								MinValue: 1, MaxValue: 100000,
+								Enabled:  c.PairRateLimitEnabled,
+								OnValueChanged: func() { g.persistPairRate() },
+								MinSize:        Size{Width: 100},
+							},
+							Label{Text: i18n.T(g.d.lang, "gen.pair_rate_burst")},
+							NumberEdit{
+								AssignTo: &g.pairRateBurst,
+								Value:    float64(c.PairRateLimitBurst),
+								MinValue: 1, MaxValue: 100000,
+								Enabled:  c.PairRateLimitEnabled,
+								OnValueChanged: func() { g.persistPairRate() },
+								MinSize:        Size{Width: 100},
+							},
+							HSpacer{},
+						},
+					},
+					Label{Text: i18n.T(g.d.lang, "gen.pair_rate_help"), TextColor: walk.RGB(110, 110, 110)},
 				},
 			},
 			GroupBox{
@@ -316,6 +369,42 @@ func (g *GeneralTab) persistMisc() {
 		c.MaxRetries = maxR
 		c.RetentionDays = ret
 	})
+}
+
+// allowAnyStatusText arma el texto de solo lectura del modo "permitir cualquier
+// origen", con el estado efectivo (ACTIVADO/DESACTIVADO) que viene del instalador.
+func (g *GeneralTab) allowAnyStatusText() string {
+	estado := i18n.T(g.d.lang, "gen.state_off")
+	if g.d.allowAny {
+		estado = i18n.T(g.d.lang, "gen.state_on")
+	}
+	return fmt.Sprintf(i18n.T(g.d.lang, "gen.cors_allow_any_ro"), estado)
+}
+
+func (g *GeneralTab) allowAnyStatusColor() walk.Color {
+	if g.d.allowAny {
+		return walk.RGB(200, 30, 30) // rojo: énfasis de advertencia (modo inseguro activo)
+	}
+	return walk.RGB(110, 110, 110)
+}
+
+func (g *GeneralTab) persistPairRate() {
+	if g.pairRatePerMin == nil || g.pairRateBurst == nil {
+		return
+	}
+	perMin := int(g.pairRatePerMin.Value())
+	burst := int(g.pairRateBurst.Value())
+	_ = g.d.cfg.Update(func(c *config.Config) {
+		c.PairRateLimitPerMinute = perMin
+		c.PairRateLimitBurst = burst
+	})
+	g.notifySettings("pair_rate_limit")
+}
+
+func (g *GeneralTab) notifySettings(detail string) {
+	if g.d.onSettingsChanged != nil {
+		g.d.onSettingsChanged(detail)
+	}
 }
 
 type originsModel struct {
