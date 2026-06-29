@@ -46,18 +46,42 @@ import (
 	"syscall"
 
 	"github.com/lautarotiamat/prinklyprint/internal/app"
+	"github.com/lautarotiamat/prinklyprint/internal/seclog"
 )
 
 // version se inyecta en build time. En desarrollo queda como "dev".
 var version = "dev"
 
+// eventLogSource es el source del Windows Event Log que registra el instalador.
+const eventLogSource = "PrinklyPrint"
+
 func main() {
 	headless := flag.Bool("headless", false, "Arranca sin UI (solo server + queue + tray)")
 	showVersion := flag.Bool("version", false, "Muestra la versión y sale")
+	// Registro del Event Log (requiere admin): lo corre el instalador elevado.
+	registerEvt := flag.Bool("register-eventlog", false, "Registra el source del Event Log (requiere admin) y sale")
+	unregisterEvt := flag.Bool("unregister-eventlog", false, "Quita el source del Event Log (requiere admin) y sale")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(version)
+		return
+	}
+
+	if *registerEvt {
+		if err := seclog.RegisterEventSource(eventLogSource); err != nil {
+			fmt.Fprintf(os.Stderr, "no se pudo registrar el Event Log: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Event Log source %q registrado.\n", eventLogSource)
+		return
+	}
+	if *unregisterEvt {
+		if err := seclog.UnregisterEventSource(eventLogSource); err != nil {
+			fmt.Fprintf(os.Stderr, "no se pudo quitar el Event Log: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Event Log source %q quitado.\n", eventLogSource)
 		return
 	}
 

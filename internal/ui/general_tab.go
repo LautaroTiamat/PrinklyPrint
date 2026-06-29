@@ -277,6 +277,33 @@ func (g *GeneralTab) Page() TabPage {
 	}
 }
 
+// Refresh re-lee los orígenes permitidos desde la config y actualiza la lista
+// si cambió (por ejemplo, cuando un pareo aprobado agregó un origen nuevo).
+// Lo llama el loop de auto-refresh mientras la ventana está visible, así el
+// origen recién conectado aparece en la lista sin reabrir la ventana.
+func (g *GeneralTab) Refresh() {
+	if g.originsModel == nil {
+		return
+	}
+	origins := g.d.cfg.Get().AllowedOrigins
+	if originsEqual(g.originsModel.items, origins) {
+		return // sin cambios: no tocamos la lista (evita resetear la selección)
+	}
+	g.originsModel.set(origins)
+}
+
+func originsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (g *GeneralTab) persistMisc() {
 	if g.portEdit == nil {
 		return

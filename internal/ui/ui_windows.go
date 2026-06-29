@@ -179,6 +179,14 @@ func (w *Window) autoRefreshLoop(ctx context.Context) {
 			w.printTab.RefreshPrinters()
 		}
 	})
+	// Refresca la lista de orígenes permitidos: un pareo aprobado agrega el
+	// origen a la config y queremos que aparezca en la pestaña General sin
+	// reabrir la ventana.
+	go w.tickEvery(ctx, 2*time.Second, func() {
+		if w.mw.Visible() {
+			w.generalTab.Refresh()
+		}
+	})
 }
 
 func (w *Window) tickEvery(ctx context.Context, d time.Duration, fn func()) {

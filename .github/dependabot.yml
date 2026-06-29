@@ -1,0 +1,28 @@
+# Dependabot mantiene al día (de forma controlada, vía PRs) los pins que
+# fijamos para endurecer la cadena de suministro. Es evidencia de gestión de
+# vulnerabilidades continua (controles C-09 / C-10 del informe).
+version: 2
+updates:
+  # GitHub Actions pineadas por SHA en los workflows (release.yml, security.yml).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(actions)"
+
+  # Módulos Go (go.mod / go.sum), incluida la herramienta rsrc fijada en tools.go.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build(deps)"
+
+  # Imagen base del Dockerfile (golang:1.25-alpine pineada por digest).
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build(docker)"

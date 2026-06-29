@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,8 +15,96 @@ import (
 	"github.com/lautarotiamat/prinklyprint/internal/store"
 )
 
+// Límites de validación de entrada para /print (control C-20).
+const (
+	maxCopies        = 999
+	maxMetadataBytes = 16 << 10 // 16 KB
+	maxQueueDepth    = 1000     // profundidad máxima de la cola (queued)
+	maxPaperSizeLen  = 64
+)
+
+var (
+	// page_range entra a -print-settings de SumatraPDF: whitelist estricta para
+	// no inyectar directivas extra. Solo dígitos, comas, guiones y espacios.
+	rePageRange = regexp.MustCompile(`^[0-9,\- ]*$`)
+	// paper_size: la lib JS permite tamaños custom como string libre; en vez de
+	// lista cerrada exigimos un charset seguro (orientation/duplex/scale SÍ son
+	// enums cerrados, ver abajo).
+	rePaperSize = regexp.MustCompile(`^[A-Za-z0-9 _-]+$`)
+)
+
+func validOrientation(s string) bool {
+	switch s {
+	case "", "portrait", "landscape":
+		return true
+	}
+	return false
+}
+
+func validDuplex(s string) bool {
+	switch s {
+	case "", "none", "long_edge", "short_edge":
+		return true
+	}
+	return false
+}
+
+func validScale(s string) bool {
+	switch s {
+	case "", "fit", "shrink", "noscale":
+		return true
+	}
+	return false
+}
+
+func validPaperSize(s string) bool {
+	if s == "" {
+		return true
+	}
+	if len(s) > maxPaperSizeLen {
+		return false
+	}
+	return rePaperSize.MatchString(s)
+}
+
+// validatePrintRequest valida options + metadata + tamaños ANTES de encolar.
+// Los magic bytes del PDF se validan en queue.Enqueue (sobre los bytes
+// decodificados del base64).
+func validatePrintRequest(req printRequest) error {
+	o := req.Options
+	if o.Copies > maxCopies {
+		return fmt.Errorf("copies excede el máximo permitido (%d)", maxCopies)
+	}
+	if !validOrientation(o.Orientation) {
+		return fmt.Errorf("orientation inválido: %q (use portrait|landscape)", o.Orientation)
+	}
+	if !validDuplex(o.Duplex) {
+		return fmt.Errorf("duplex inválido: %q (use none|long_edge|short_edge)", o.Duplex)
+	}
+	if !validScale(o.Scale) {
+		return fmt.Errorf("scale inválido: %q (use fit|shrink|noscale)", o.Scale)
+	}
+	if !validPaperSize(o.PaperSize) {
+		return fmt.Errorf("paper_size inválido: solo letras, números, espacio, guion y guion bajo (máx %d)", maxPaperSizeLen)
+	}
+	if !rePageRange.MatchString(o.PageRange) {
+		return fmt.Errorf(`page_range inválido: solo dígitos, comas, guiones y espacios (ej. "1,3-5,10")`)
+	}
+	if req.Metadata != nil {
+		b, err := json.Marshal(req.Metadata)
+		if err != nil {
+			return fmt.Errorf("metadata no serializable: %w", err)
+		}
+		if len(b) > maxMetadataBytes {
+			return fmt.Errorf("metadata excede el máximo permitido (%d bytes)", maxMetadataBytes)
+		}
+	}
+	return nil
+}
+
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /ping", s.handlePing)
+	mux.HandleFunc("POST /pair", s.handlePair)
 	mux.HandleFunc("GET /printers", s.handlePrinters)
 	mux.HandleFunc("GET /settings", s.handleGetSettings)
 	mux.HandleFunc("POST /print", s.handlePrint)
@@ -69,7 +159,6 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 type printRequest struct {
 	PDFBase64 string              `json:"pdf_base64"`
-	PDFURL    string              `json:"pdf_url"`
 	Filename  string              `json:"filename"`
 	Options   printRequestOptions `json:"options"`
 	Metadata  map[string]any      `json:"metadata"`
@@ -130,19 +219,32 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
 	var req printRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_body", err.Error())
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := validatePrintRequest(req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	// Profundidad máxima de cola: evita acumulación/DoS de jobs pendientes.
+	if n, err := s.cfg.Store.CountByStatus(r.Context(), store.StatusQueued); err == nil && n >= maxQueueDepth {
+		writeErr(w, http.StatusTooManyRequests, "queue_full", "la cola está llena; reintentá más tarde")
 		return
 	}
 	cfg := s.cfg.Config.Get()
 	resolved := resolveOptions(req.Options, cfg)
 	id, err := s.cfg.Queue.Enqueue(r.Context(), queue.EnqueueParams{
-		PDFBase64: req.PDFBase64, PDFURL: req.PDFURL, Filename: req.Filename,
+		PDFBase64: req.PDFBase64, Filename: req.Filename,
 		Options: resolved, Metadata: req.Metadata,
 	})
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "enqueue_failed", err.Error())
+		// Errores de Enqueue son de input del cliente (pdf_base64 faltante,
+		// base64 inválido, contenido que no es un PDF) → 400.
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	// Evento de seguridad (C-11/C-12): qué se encoló y desde qué origen.
+	s.cfg.SecLog.PrintEnqueued(id, req.Filename, r.Header.Get("Origin"))
 	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": id, "status": "queued"})
 }
 
@@ -150,6 +252,16 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+	// Bounds de paginación (C-20): limit en 1..500 (default 100), offset >= 0.
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	f := store.ListJobsFilter{
 		Status: store.Status(strings.TrimSpace(q.Get("status"))),
 		Limit:  limit, Offset: offset,

@@ -27,6 +27,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/lautarotiamat/prinklyprint/internal/winfs"
 	_ "modernc.org/sqlite"
 )
 
@@ -58,6 +59,12 @@ func Open(path string) (*Store, error) {
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		return nil, err
+	}
+	// Datos en reposo: la DB tiene jobs (metadata, errores). La restringimos
+	// owner-only (best-effort), junto con los sidecars de WAL que SQLite crea.
+	// El migrate ya escribió, así que -wal/-shm existen.
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		_ = winfs.Restrict(p)
 	}
 	return s, nil
 }

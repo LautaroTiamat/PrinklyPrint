@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lautarotiamat/prinklyprint/internal/winfs"
 )
 
 const retentionDays = 14
@@ -23,9 +25,12 @@ type FileRotator struct {
 }
 
 func NewFileRotator(dir, prefix string) (*FileRotator, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("crear dir de logs: %w", err)
 	}
+	// Datos en reposo: los logs pueden tener metadata de jobs (filenames, errores).
+	// Restringimos el dir owner-only (best-effort). Ver internal/winfs.
+	_ = winfs.Restrict(dir)
 	r := &FileRotator{dir: dir, prefix: prefix}
 	if err := r.rotate(); err != nil {
 		return nil, err
@@ -65,10 +70,11 @@ func (r *FileRotator) rotateLocked() error {
 	}
 	day := time.Now().Format("2006-01-02")
 	name := filepath.Join(r.dir, fmt.Sprintf("%s-%s.log", r.prefix, day))
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("abrir log: %w", err)
 	}
+	_ = winfs.Restrict(name) // owner-only, best-effort
 	r.currentFile = f
 	r.currentDay = day
 	go r.cleanup()

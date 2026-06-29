@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/lautarotiamat/prinklyprint/internal/locale"
+	"github.com/lautarotiamat/prinklyprint/internal/winfs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -116,10 +117,16 @@ func (m *Manager) persistLocked() error {
 		return fmt.Errorf("serializar yaml: %w", err)
 	}
 	tmp := m.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return fmt.Errorf("escribir config: %w", err)
 	}
-	return os.Rename(tmp, m.path)
+	if err := os.Rename(tmp, m.path); err != nil {
+		return err
+	}
+	// Datos en reposo: el config puede tener orígenes aprobados y defaults;
+	// lo restringimos owner-only (best-effort). Ver internal/winfs.
+	_ = winfs.Restrict(m.path)
+	return nil
 }
 
 func mergeDefaults(c Config) Config {

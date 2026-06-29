@@ -13,14 +13,27 @@
 # NO compila el instalador (Setup.exe) — eso lo hace GitHub Actions en un runner
 # Windows porque Wine en Docker Desktop / WSL2 tiene un bug irresoluble con
 # sockets (sock_check_pollhup ENOSYS). Para releases: git tag vX.Y.Z && push.
+#
+# Supply chain (ver también .github/workflows/release.yml):
+#   - Imagen base pineada por DIGEST (inmutable), no por tag mutable.
+#   - rsrc pineado a una versión exacta (verificada contra la checksum DB de Go).
+#   - SumatraPDF se verifica por SHA256 contra checksums.txt; el build FALLA si
+#     no coincide.
+#   - Build reproducible: -trimpath y -buildid= vacío, CGO_ENABLED explícito.
 
-FROM golang:1.22-alpine
+# golang:1.25-alpine pineado por digest. Para actualizar (lo hace Dependabot):
+#   docker buildx imagetools inspect golang:1.25-alpine --format '{{.Manifest.Digest}}'
+# Go 1.25 (no 1.22): la 1.22 quedó fuera de la ventana de parches y arrastra
+# vulnerabilidades de la stdlib que govulncheck marca (request smuggling, etc.).
+FROM golang:1.25-alpine@sha256:523c3effe300580ed375e43f43b1c9b091b68e935a7c3a92bfcc4e7ed55b18c2
 
 RUN apk add --no-cache git ca-certificates curl imagemagick
 
 # rsrc: embebe el manifest XML (Common Controls v6 + DPI awareness) y el ícono
-# del .exe (lo que se ve en taskbar, Alt+Tab, escritorio).
-RUN go install github.com/akavel/rsrc@latest
+# del .exe. Pineado a una versión exacta (no @latest): `go install pkg@vX.Y.Z`
+# verifica el módulo contra la checksum DB de Go (sum.golang.org). La versión va
+# en sync con la fijada en go.mod/go.sum vía tools.go.
+RUN go install github.com/akavel/rsrc@v0.10.2
 
 ENV CGO_ENABLED=0 \
     GOOS=windows \
@@ -32,13 +45,15 @@ WORKDIR /work
 ENTRYPOINT ["/bin/sh", "-c", "\
 set -e; \
 VERSION=\"${VERSION:-dev}\"; \
-mkdir -p dist; \
-mkdir -p internal/embedded; \
+mkdir -p dist internal/embedded; \
 SUMATRA=internal/embedded/SumatraPDF.exe; \
-if [ ! -s \"$SUMATRA\" ]; then \
-  echo 'Bajando SumatraPDF...'; \
-  curl -fsSL -o \"$SUMATRA\" https://www.sumatrapdfreader.org/dl/rel/3.5.2/SumatraPDF-3.5.2-64.exe; \
-fi; \
+SUMATRA_URL=https://www.sumatrapdfreader.org/dl/rel/3.5.2/SumatraPDF-3.5.2-64.exe; \
+if [ ! -s \"$SUMATRA\" ]; then echo 'Bajando SumatraPDF...'; curl -fsSL -o \"$SUMATRA\" \"$SUMATRA_URL\"; fi; \
+EXPECTED=$(awk '/SumatraPDF-3.5.2-64.exe/ && $1 ~ /^[0-9a-f]{64}$/ {print $1}' checksums.txt); \
+ACTUAL=$(sha256sum \"$SUMATRA\" | awk '{print $1}'); \
+if [ -z \"$EXPECTED\" ]; then echo 'ERROR: no encontré el SHA256 esperado de SumatraPDF en checksums.txt'; exit 1; fi; \
+if [ \"$EXPECTED\" != \"$ACTUAL\" ]; then echo \"ERROR: SHA256 de SumatraPDF no coincide. esperado=$EXPECTED obtenido=$ACTUAL\"; exit 1; fi; \
+echo \"SumatraPDF verificado OK ($ACTUAL)\"; \
 rsrc -manifest app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso; \
 mkdir -p internal/tray/assets; \
 for spec in green:#2ea044 yellow:#d9a307 red:#dc2626; do \
@@ -56,6 +71,6 @@ for spec in green:#2ea044 yellow:#d9a307 red:#dc2626; do \
 done; \
 go mod download; \
 go build -tags with_sumatra -trimpath \
-  -ldflags=\"-s -w -H=windowsgui -X main.version=$VERSION\" \
+  -ldflags=\"-s -w -H=windowsgui -buildid= -X main.version=$VERSION\" \
   -o dist/prinklyprint.exe .; \
 echo \"OK -> dist/prinklyprint.exe v$VERSION\""]

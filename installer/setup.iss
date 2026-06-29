@@ -11,7 +11,8 @@
 ;     el .exe. Sin esto, "archivo en uso" rompía la actualización.
 ;   - CloseApplications=force → si la app no respeta el cierre, Inno la mata.
 ;
-; Variables inyectadas desde la línea de comandos por docker-compose:
+; Variables inyectadas por línea de comandos desde el job build-installer de
+; .github/workflows/release.yml (runner Windows nativo):
 ;   ISCC.exe /DAppVersion=1.0.0 setup.iss
 ; ─────────────────────────────────────────────────────────────────────────────
 
@@ -91,10 +92,17 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
+; Registra el source del Windows Event Log (requiere admin; el instalador ya
+; corre elevado). Habilita los eventos de seguridad que recolecta el SIEM.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--register-eventlog"; \
+  Flags: runhidden; StatusMsg: "Registrando el Event Log de seguridad..."
 Filename: "{app}\{#MyAppExeName}"; Description: "Iniciar {#MyAppName} ahora"; \
   Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+; Quita el source del Event Log antes de borrar el .exe.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-eventlog"; \
+  Flags: runhidden; RunOnceId: "UnregEventLog"
 ; Siempre intentamos borrar la entrada del Run, aunque el usuario haya
 ; toggle-ado autostart desde la app después de instalar.
 Filename: "reg.exe"; \

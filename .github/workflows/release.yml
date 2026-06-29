@@ -2,15 +2,37 @@
 #
 # Se dispara al pushear un tag con formato vX.Y.Z (ej. v1.0.0). El flujo:
 #
-#   1. Linux runner: compila prinklyprint.exe (cross-compile a windows/amd64).
-#   2. Windows runner: agarra el .exe del paso anterior y arma el instalador
-#      con Inno Setup nativo (mucho más confiable que Wine en CI).
-#   3. Linux runner: publica un GitHub Release con ambos binarios adjuntos.
+#   1. Linux runner: compila prinklyprint.exe (cross-compile a windows/amd64)
+#      y genera el SBOM (CycloneDX).
+#   2. Windows runner: agarra el .exe, lo FIRMA (Authenticode), arma el
+#      instalador con Inno Setup nativo y FIRMA el instalador.
+#   3. Linux runner: genera la attestation de procedencia (build provenance) de
+#      los binarios firmados y publica un GitHub Release con todo adjunto.
 #
 # Para liberar una versión nueva:
 #   git tag v1.1.0 && git push origin v1.1.0
 #
-# Eso es todo — el resto lo hace GitHub Actions.
+# === Supply chain (endurecimiento) ===
+#   - Todas las actions están pineadas por COMMIT SHA (no por tag mutable).
+#     Dependabot (.github/dependabot.yml) las mantiene al día de forma controlada.
+#   - SumatraPDF se verifica por SHA256 contra checksums.txt (el build FALLA si
+#     no coincide). rsrc se ejecuta vía `go run` con integridad de go.sum.
+#   - Permisos por job con mínimo privilegio (no hay contents: write global).
+#   - Build reproducible: -trimpath, -buildid= vacío, CGO_ENABLED explícito.
+#   - Firma de .exe e instalador (ver .github/scripts/sign.ps1) + attestation.
+#
+# === Secrets / variables para la firma (Settings → Secrets and variables) ===
+#   Opción A — certificado .pfx:
+#     secret WINDOWS_CERT_PFX_BASE64  → el .pfx codificado en base64
+#       (PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx')))
+#     secret WINDOWS_CERT_PASSWORD    → password del .pfx
+#   Opción B — servicio de firma externo / HSM (Azure Trusted Signing, DigiCom, …):
+#     secret SIGN_COMMAND             → comando de firma; {FILE} se reemplaza por
+#                                       la ruta del archivo a firmar.
+#   Opcional:
+#     variable WINDOWS_TIMESTAMP_URL  → servidor RFC3161 (default DigiCert).
+#   Si no hay credenciales, el build NO falla pero los binarios salen SIN firmar
+#   (warn + skip). El release de producción debe tener las credenciales cargadas.
 
 name: Release
 
@@ -19,49 +41,62 @@ on:
     tags:
       - 'v*'
 
+# Mínimo privilegio a nivel workflow; cada job amplía lo que necesita.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-exe:
-    name: Build prinklyprint.exe
+    name: Build prinklyprint.exe + SBOM
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: true
 
       - name: Install build deps
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends imagemagick
 
-      - name: Install rsrc
-        run: go install github.com/akavel/rsrc@latest
-
-      - name: Download SumatraPDF
+      - name: Download & verify SumatraPDF (SHA256 contra checksums.txt)
         run: |
+          set -euo pipefail
           mkdir -p internal/embedded
           curl -fsSL -o internal/embedded/SumatraPDF.exe \
             https://www.sumatrapdfreader.org/dl/rel/3.5.2/SumatraPDF-3.5.2-64.exe
+          expected=$(awk '/SumatraPDF-3.5.2-64.exe/ && $1 ~ /^[0-9a-f]{64}$/ {print $1}' checksums.txt)
+          if [ -z "$expected" ]; then
+            echo "ERROR: no encontré el SHA256 esperado en checksums.txt"; exit 1
+          fi
+          echo "${expected}  internal/embedded/SumatraPDF.exe" | sha256sum -c -
 
       - name: Generate rsrc.syso (manifest + .exe icon)
-        run: $(go env GOPATH)/bin/rsrc -manifest app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso
+        # rsrc viene pineado en go.mod/go.sum vía tools.go; `go run` usa esa
+        # versión con integridad verificada (no @latest).
+        run: go run github.com/akavel/rsrc -manifest app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso
 
       - name: Generate tray icons
         run: |
           mkdir -p internal/tray/assets
-          # Ubuntu trae ImageMagick v6 cuyo binario es `convert`; Alpine (Docker
-          # local) trae v7 con `magick`. Usamos cualquiera de los dos según lo
-          # que esté disponible — la sintaxis del comando es idéntica para
-          # nuestro caso (draw + clone + resize).
+          # Ubuntu trae ImageMagick v6 (`convert`); Alpine (Docker local) trae v7
+          # (`magick`). Usamos el que esté — la sintaxis es idéntica acá.
           MAGICK=$(command -v magick || command -v convert)
           for spec in "green:#2ea044" "yellow:#d9a307" "red:#dc2626"; do
             name="${spec%:*}"; color="${spec#*:}"
@@ -85,27 +120,52 @@ jobs:
         run: |
           mkdir -p dist
           go build -tags with_sumatra -trimpath \
-            -ldflags="-s -w -H=windowsgui -X main.version=${{ steps.version.outputs.version }}" \
+            -ldflags="-s -w -H=windowsgui -buildid= -X main.version=${{ steps.version.outputs.version }}" \
             -o dist/prinklyprint.exe .
           ls -la dist/
 
-      - uses: actions/upload-artifact@v4
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          "$(go env GOPATH)/bin/cyclonedx-gomod" mod -json -licenses -output bom.json
+          test -s bom.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prinklyprint-exe
           path: dist/prinklyprint.exe
           retention-days: 1
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prinklyprint-sbom
+          path: bom.json
+          retention-days: 5
+
   build-installer:
-    name: Build PrinklyPrint-Setup.exe
+    name: Build & sign PrinklyPrint-Setup.exe
     needs: build-exe
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: prinklyprint-exe
           path: dist/
+
+      - name: Sign prinklyprint.exe (Authenticode)
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          SIGN_COMMAND: ${{ secrets.SIGN_COMMAND }}
+          TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: ./.github/scripts/sign.ps1 -File dist/prinklyprint.exe
 
       - name: Compile installer (Inno Setup is pre-installed on windows-latest)
         shell: pwsh
@@ -116,28 +176,66 @@ jobs:
           }
           & $iscc "/DAppVersion=${{ needs.build-exe.outputs.version }}" installer\setup.iss
 
-      - uses: actions/upload-artifact@v4
+      - name: Sign PrinklyPrint-Setup.exe (Authenticode)
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          SIGN_COMMAND: ${{ secrets.SIGN_COMMAND }}
+          TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: ./.github/scripts/sign.ps1 -File dist/PrinklyPrint-Setup.exe
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prinklyprint-exe-signed
+          path: dist/prinklyprint.exe
+          retention-days: 1
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prinklyprint-installer
           path: dist/PrinklyPrint-Setup.exe
           retention-days: 1
 
   release:
-    name: Publish GitHub Release
+    name: Attest & publish GitHub Release
     needs: [build-exe, build-installer]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # crear el Release
+      id-token: write       # attestation (OIDC)
+      attestations: write   # attestation (build provenance)
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
-          name: prinklyprint-exe
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prinklyprint-exe-signed
           path: dist/
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: prinklyprint-installer
           path: dist/
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prinklyprint-sbom
+          path: dist/
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/prinklyprint.exe
+            dist/PrinklyPrint-Setup.exe
 
       - name: Extract changelog section for this version
         id: changelog
@@ -150,12 +248,13 @@ jobs:
           ' CHANGELOG.md > release-notes.md || echo "Release $VERSION" > release-notes.md
           cat release-notes.md
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: PrinklyPrint v${{ needs.build-exe.outputs.version }}
           body_path: release-notes.md
           files: |
             dist/prinklyprint.exe
             dist/PrinklyPrint-Setup.exe
+            dist/bom.json
           draft: false
           prerelease: false

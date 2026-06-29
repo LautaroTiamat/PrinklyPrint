@@ -1,0 +1,149 @@
+# Pruebas de seguridad continuas (SAST + SCA + secret scanning).
+#
+# Corre en push y PR a main, y semanalmente (schedule) para detectar vulns
+# nuevas en dependencias que ya estaban en el repo.
+#
+# IMPORTANTE — enforcement: que estos jobs "fallen" NO bloquea el merge por sí
+# solo. Para que bloqueen hay que configurar en Settings del repo:
+#   - Branch protection en main → Require status checks to pass:
+#       govulncheck, gosec, codeql, gitleaks.
+#   - Code security → Code scanning → marcar como required.
+#   - Code security → Secret scanning + Push protection: activar.
+# Ver README → sección de seguridad.
+#
+# NOTA si el repo es PRIVADO: CodeQL / code scanning (SARIF) requieren GitHub
+# Advanced Security (pago). Si no está disponible, comentá el job `codeql` y el
+# upload-sarif de `gosec`, y cubrí SAST con gosec (salida de texto) + semgrep
+# (`semgrep/semgrep` no requiere GHAS). Este repo es público, así que CodeQL y
+# upload-sarif funcionan sin costo.
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1' # lunes 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck (SCA)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
+          # Falla si hay vulnerabilidades que afectan código alcanzable.
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  gosec:
+    name: gosec (SAST)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # subir SARIF al tab Security
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Run gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          # -no-fail: genera el SARIF aunque haya hallazgos (los reportamos en el
+          # tab Security). El gating real lo hace branch protection + code scanning.
+          "$(go env GOPATH)/bin/gosec" -no-fail -severity medium -fmt sarif -out gosec.sarif ./...
+
+      - name: Upload gosec SARIF
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  codeql:
+    name: CodeQL (SAST)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        with:
+          languages: go
+          # build-mode none: CodeQL analiza el código sin compilarlo. Evita el
+          # problema de que el build real necesita -tags with_sumatra + SumatraPDF
+          # + archivos windows-only, que no compilan en el runner Linux sin esos
+          # insumos.
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        with:
+          category: '/language:go'
+
+  gitleaks:
+    name: gitleaks (secret scanning)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0 # historia completa para escanear todos los commits
+          persist-credentials: false
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE solo es necesario para repos de ORGANIZACIÓN. Este
+          # repo es personal/público, así que no hace falta. (Además, GitHub trae
+          # secret scanning nativo + push protection, que hay que activar en
+          # Settings — ver README.)

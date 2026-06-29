@@ -7,20 +7,31 @@
 //	GET    /ping                    healthcheck (usado por el "circulito" de la lib JS)
 //	GET    /printers                lista impresoras del sistema + estado
 //	GET    /settings                config default actual del agente
-//	POST   /print                   encola un PDF (base64 o URL)
+//	POST   /print                   encola un PDF (base64 inline)
 //	GET    /jobs                    lista jobs (filtro por estado, paginado)
 //	GET    /jobs/{id}               detalle de un job
 //	POST   /jobs/{id}/retry         reencola un job failed
 //	DELETE /jobs/{id}               cancela un job queued
 //
-// Seguridad: el modelo de amenazas es "página web maliciosa en el navegador
-// del operador". Por eso aplicamos CORS estricto: solo aceptamos requests
-// cuyo Origin esté en la whitelist [config.Config.AllowedOrigins]. La
-// whitelist se configura desde la UI del agente; arranca vacía y rechaza
-// todo hasta que el operador agrega el dominio explícitamente.
+// Seguridad: el modelo de amenazas es (a) procesos locales no-navegador que
+// llaman al loopback y (b) páginas web maliciosas en el navegador del operador.
+// La puerta de acceso es el TOKEN + el DIÁLOGO de pairing:
+//
+//   - Token por instalación (Bearer): todos los endpoints sensibles exigen
+//     "Authorization: Bearer <token>" (ver [requireToken]). Faltar o ser
+//     inválido el token devuelve 401 sin importar el Origin. Exentos de token:
+//     GET /ping y POST /pair.
+//
+//   - Pairing con consentimiento: el token se emite por POST /pair. Para un
+//     origen nuevo, el agente muestra un diálogo nativo y el operador decide;
+//     al aprobar, el origen se agrega a [config.Config.AllowedOrigins] (visible
+//     en la UI) y los pareos siguientes son silenciosos. Ver [handlePair].
+//
+//   - CORS permisivo (NO es la puerta): refleja cualquier Origin y responde el
+//     preflight. Es a propósito: con CORS estricto el navegador bloquearía el
+//     preflight antes del 401 y el pairing nunca podría arrancar. Ver [cors].
 //
 // No usamos TLS porque es loopback: el tráfico nunca sale de la máquina.
-// No usamos pairing token porque CORS estricto cubre el caso de uso real.
 //
 // Merge de defaults: el handler de POST /print fusiona las opciones del
 // cliente con los defaults del agente. Para los campos booleanos y float64
@@ -35,11 +46,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/lautarotiamat/prinklyprint/internal/auth"
 	"github.com/lautarotiamat/prinklyprint/internal/config"
 	"github.com/lautarotiamat/prinklyprint/internal/printer"
 	"github.com/lautarotiamat/prinklyprint/internal/queue"
+	"github.com/lautarotiamat/prinklyprint/internal/seclog"
 	"github.com/lautarotiamat/prinklyprint/internal/store"
 )
 
@@ -50,22 +64,29 @@ type Config struct {
 	Printer   *printer.Service
 	Queue     *queue.Worker
 	Config    *config.Manager
+	Auth      *auth.Store
+	Prompter  PairingPrompter
+	SecLog    *seclog.Logger // eventos de seguridad → slog + Event Log (C-11/C-12)
 	Version   string
 	MachineID string
 }
 
 type Server struct {
-	cfg Config
-	srv *http.Server
+	cfg    Config
+	srv    *http.Server
+	pairMu sync.Mutex // serializa el handshake de pairing (un diálogo a la vez)
 }
 
 func New(cfg Config) *Server {
 	s := &Server{cfg: cfg}
 	mux := http.NewServeMux()
 	s.routes(mux)
+	// Orden de middlewares: cors por fuera, requireToken por dentro, mux al
+	// fondo. Así el preflight OPTIONS lo resuelve CORS antes del chequeo de token.
+	handler := cors(s.requireToken(mux))
 	s.srv = &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           cors(cfg.Config, cfg.Logger, mux),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
