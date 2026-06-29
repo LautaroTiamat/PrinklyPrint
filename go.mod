@@ -3,7 +3,7 @@ module github.com/lautarotiamat/prinklyprint
 go 1.25.0
 
 require (
-	fyne.io/systray v1.11.0
+	fyne.io/systray v1.12.2
 	github.com/akavel/rsrc v0.10.2
 	github.com/google/uuid v1.6.0
 	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
