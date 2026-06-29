@@ -2,6 +2,13 @@
 
 Todas las versiones notables de PrinklyPrint quedan documentadas acá. Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el proyecto sigue [Semantic Versioning](https://semver.org/lang/es/).
 
+## [1.2.1] — 2026-06-29
+
+### Corregido
+- **El agente no arrancaba** (la ventana/ícono de bandeja no aparecían y el proceso salía en silencio, al ser GUI sin consola). Causa: los permisos owner-only (`internal/winfs`) aplicaban las ACEs **sin marca de herencia**, así que los archivos creados dentro de los directorios restringidos (logs rotados, PDFs, DB) quedaban con una **DACL vacía** y el propio agente no podía reabrirlos en el siguiente arranque (`abrir log: Access is denied`). Además se concedía acceso vía `OWNER RIGHTS` (S-1-3-4), de semántica ambigua.
+  - Ahora `winfs.Restrict` concede el **SID explícito del usuario** que corre el agente (es el mismo en un token normal o elevado) en lugar de `OWNER RIGHTS`, y en **directorios** aplica ACEs **heredables** (`OICI`) para que los archivos hereden el acceso. Verificado en Windows real: el agente arranca, extrae SumatraPDF, crea logs accesibles y responde `GET /ping`.
+- **Al actualizar desde 1.2.0**: si el agente no abría, después de instalar 1.2.1 conviene borrar `%LOCALAPPDATA%\PrinklyPrint` una vez (se regenera solo) para limpiar los archivos que quedaron con permisos rotos. Esto regenera el token de la instalación (las apps vuelven a parear).
+
 ## [1.2.0] — 2026-06-29
 
 Endurecimiento de seguridad en dos frentes: la **cadena de suministro** del pipeline de build/release (con evidencia auditable) y el **agente** en sí, cerrando tres brechas del informe — datos en reposo sin cifrar, validación de entrada incompleta y logging no integrado a SIEM.
