@@ -15,9 +15,10 @@ func TestConfigValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"defaults", func(c *Config) {}, false},
-		{"port mínimo", func(c *Config) { c.Port = 1 }, false},
+		{"port mínimo", func(c *Config) { c.Port = 1024 }, false},
 		{"port máximo", func(c *Config) { c.Port = 65535 }, false},
 		{"port 0", func(c *Config) { c.Port = 0 }, true},
+		{"port privilegiado", func(c *Config) { c.Port = 80 }, true},
 		{"port fuera de rango", func(c *Config) { c.Port = 65536 }, true},
 		{"retries 0", func(c *Config) { c.MaxRetries = 0 }, false},
 		{"retries 20", func(c *Config) { c.MaxRetries = 20 }, false},

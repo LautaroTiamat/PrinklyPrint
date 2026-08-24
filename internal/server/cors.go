@@ -52,25 +52,46 @@ func setCORSHeaders(w http.ResponseWriter, origin string) {
 	h.Set("Access-Control-Max-Age", "600")
 }
 
+// NormalizeOrigin limpia una entrada de origen tal como la escribe el operador:
+// recorta espacios y barras finales. El header Origin del navegador nunca trae
+// barra final ni path ("https://app.empresa.com"), pero el operador sí suele
+// escribir "https://app.empresa.com/" — sin esta normalización esa entrada
+// jamás matchearía y el agente no reconocería al cliente.
+func NormalizeOrigin(s string) string {
+	s = strings.TrimSpace(s)
+	for strings.HasSuffix(s, "/") && !strings.HasSuffix(s, "://") {
+		s = strings.TrimSuffix(s, "/")
+	}
+	return s
+}
+
 // isAllowedOrigin indica si el origen coincide con alguno de la lista (match
 // exacto, por host, o wildcard de subdominio "*.dominio"). Lo usa
 // [Server.originApproved] para decidir si /pair entrega el token sin diálogo.
+//
+// El match es case-insensitive (scheme y host no distinguen mayúsculas) y
+// ambos lados se normalizan (espacios y "/" finales fuera), así una entrada
+// escrita a mano con barra final sigue matcheando. Por diseño, una entrada
+// sin esquema ("miapp.com", "*.empresa.com") matchea tanto http:// como
+// https:// — hay despliegues legítimos de intranet sin TLS.
 func isAllowedOrigin(origin string, allowed []string) bool {
+	origin = NormalizeOrigin(origin)
 	host := stripScheme(origin)
 	for _, a := range allowed {
+		a = NormalizeOrigin(a)
 		if a == "" {
 			continue
 		}
-		if a == origin {
+		if strings.EqualFold(a, origin) {
 			return true
 		}
 		if strings.HasPrefix(a, "*.") {
 			suffix := a[1:]
-			if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
+			if len(host) > len(suffix) && strings.EqualFold(host[len(host)-len(suffix):], suffix) {
 				return true
 			}
 		}
-		if a == host {
+		if strings.EqualFold(a, host) {
 			return true
 		}
 	}

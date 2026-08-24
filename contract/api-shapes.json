@@ -1,0 +1,110 @@
+{
+  "DELETE /jobs/{id}": {
+    "status": "string"
+  },
+  "GET /jobs": {
+    "jobs": [
+      {
+        "attempts": "number",
+        "created_at": "string",
+        "filename": "string",
+        "id": "string",
+        "last_error": "string",
+        "metadata": {
+          "origen": "string"
+        },
+        "options": {
+          "color": "bool",
+          "copies": "number",
+          "custom_height_mm": "number",
+          "custom_width_mm": "number",
+          "duplex": "string",
+          "orientation": "string",
+          "page_range": "string",
+          "paper_size": "string",
+          "printer": "string",
+          "scale": "string"
+        },
+        "printer": "string",
+        "status": "string",
+        "sumatra_log": "string",
+        "updated_at": "string"
+      }
+    ],
+    "limit": "number",
+    "offset": "number",
+    "total": "number"
+  },
+  "GET /jobs/{id}": {
+    "attempts": "number",
+    "created_at": "string",
+    "filename": "string",
+    "id": "string",
+    "last_error": "string",
+    "metadata": {
+      "origen": "string"
+    },
+    "options": {
+      "color": "bool",
+      "copies": "number",
+      "custom_height_mm": "number",
+      "custom_width_mm": "number",
+      "duplex": "string",
+      "orientation": "string",
+      "page_range": "string",
+      "paper_size": "string",
+      "printer": "string",
+      "scale": "string"
+    },
+    "printer": "string",
+    "status": "string",
+    "sumatra_log": "string",
+    "updated_at": "string"
+  },
+  "GET /ping": {
+    "ok": "bool",
+    "paused": "bool",
+    "version": "string"
+  },
+  "GET /printers[]": {
+    "comment": "string",
+    "driver_name": "string",
+    "is_default": "bool",
+    "is_network": "bool",
+    "job_count": "number",
+    "location": "string",
+    "name": "string",
+    "port_name": "string",
+    "severity": "string",
+    "status": "string",
+    "statuses": [
+      "string"
+    ]
+  },
+  "GET /settings": {
+    "color": "bool",
+    "custom_height_mm": "number",
+    "custom_width_mm": "number",
+    "default_printer": "string",
+    "duplex": "string",
+    "machine_id": "string",
+    "orientation": "string",
+    "paper_size": "string",
+    "paused": "bool",
+    "scale": "string"
+  },
+  "POST /jobs/{id}/retry": {
+    "status": "string"
+  },
+  "POST /pair": {
+    "token": "string"
+  },
+  "POST /print": {
+    "job_id": "string",
+    "status": "string"
+  },
+  "error": {
+    "error": "string",
+    "message": "string"
+  }
+}

@@ -79,10 +79,11 @@ apps con token cacheado quedan invalidadas y tendrán que **re-parear**. Para lo
 orígenes que sigan en `allowed_origins`, el re-pareo es silencioso (no vuelve a
 pedir diálogo); para el resto, vuelve a pedir aprobación.
 
-- Vía la acción de regenerar token en la UI (si está disponible en tu versión).
-- Alternativa de emergencia: detené el agente, borrá `auth.json` y reiniciá — el
-  agente genera un token nuevo en el próximo arranque. (Esto rota el token; no
-  toca `allowed_origins`.)
+- Vía la UI: **General → «Regenerar token»** (pide confirmación, con «No» como
+  default). Es la vía recomendada: rota en caliente, sin reiniciar el agente.
+- Alternativa de emergencia (agente que no arranca, o sin UI): detené el agente,
+  borrá `auth.json` y reiniciá — el agente genera un token nuevo en el próximo
+  arranque. (Esto rota el token; no toca `allowed_origins`.)
 
 La rotación emite el evento `token_rotated` (1006).
 

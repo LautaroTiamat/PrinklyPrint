@@ -143,6 +143,9 @@ var dict = map[string]map[Lang]string{
 	"gen.author":            {ES: "Autor:", EN: "Author:", PT: "Autor:"},
 	"gen.github":            {ES: "GitHub:", EN: "GitHub:", PT: "GitHub:"},
 	"gen.open_logs":         {ES: "Abrir carpeta de logs", EN: "Open logs folder", PT: "Abrir pasta de logs"},
+	"gen.rotate_token":      {ES: "Regenerar token", EN: "Regenerate token", PT: "Regenerar token"},
+	"gen.rotate_confirm":    {ES: "¿Regenerar el token de esta instalación?\n\nTODAS las apps pareadas dejarán de tener acceso y deberán volver a parear (con aprobación del operador). Usalo ante una sospecha de filtración del token.", EN: "Regenerate this installation's token?\n\nALL paired apps will lose access and must pair again (with operator approval). Use this if you suspect the token leaked.", PT: "Regenerar o token desta instalação?\n\nTODOS os apps pareados perderão o acesso e deverão parear novamente (com aprovação do operador). Use em caso de suspeita de vazamento do token."},
+	"gen.rotate_done":       {ES: "Token regenerado. Las apps pareadas volverán a pedir aprobación en su próximo uso.", EN: "Token regenerated. Paired apps will ask for approval again on their next use.", PT: "Token regenerado. Os apps pareados pedirão aprovação novamente no próximo uso."},
 	"gen.shutdown":          {ES: "Cerrar PrinklyPrint", EN: "Shut down PrinklyPrint", PT: "Encerrar PrinklyPrint"},
 	"gen.shutdown_confirm":  {ES: "¿Cerrar PrinklyPrint?\n\nEl agente se detendrá y la web no podrá imprimir hasta que lo vuelvas a iniciar.", EN: "Shut down PrinklyPrint?\n\nThe agent will stop and your web won't be able to print until you launch it again.", PT: "Encerrar PrinklyPrint?\n\nO agente será interrompido e a web não poderá imprimir até reiniciá-lo."},
 

@@ -5,10 +5,13 @@
 
   El archivo .syso que el toolchain Go embebe se genera durante el build
   con `rsrc -manifest app.manifest -ico icon.ico -o rsrc.syso`.
+
+  version="0.0.0.0" es un PLACEHOLDER: el build (Dockerfile / release.yml)
+  lo sustituye por la versión real (X.Y.Z.0) antes de invocar rsrc.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-      version="0.1.0.0"
+      version="0.0.0.0"
       processorArchitecture="amd64"
       name="PrinklyPrint"
       type="win32"

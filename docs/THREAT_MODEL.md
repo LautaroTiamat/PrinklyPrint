@@ -188,11 +188,27 @@ alcance del agente.
 
 ---
 
-## 5. Pendiente de validación en Windows real
+## 5. Estado de validación en Windows real
 
 Varias mitigaciones son Windows-only y, en este entorno de desarrollo (Linux/CI),
-se ejercitan mediante stubs e interfaces. **Quedan pendientes de validación en un
-Windows real**: el cifrado efectivo en disco (que `file`/un visor no reconozca un
-`.pdf.enc` como PDF), la DACL owner-only (verificable con `icacls`), la aparición
-de eventos en el Visor de eventos, y la firma con un certificado real. El detalle
-de cómo verificarlas está en `docs/PENTEST_GUIDE.md`.
+se ejercitan mediante stubs e interfaces.
+
+**Ya validado en Windows real** (instalación de producción 1.3.1, Windows 11
+IoT Enterprise LTSC 2024, agosto 2026):
+
+- **Cifrado en reposo (DPAPI)**: un `pdfs/<id>.pdf.enc` en disco es un blob
+  DPAPI (cabecera `01 00 00 00 d0 8c 9d df 01 15 d1 11 …`, el GUID estándar de
+  `CryptProtectData`), no un PDF legible — los magic bytes `%PDF-` no aparecen.
+- **DACL owner-only** (`winfs.Restrict`, desde 1.2.1): `icacls` sobre el data
+  dir, `auth.json`, `pdfs/` y los `.enc` muestra exactamente las tres ACEs
+  documentadas (SID del usuario, SYSTEM, Administradores; `(OI)(CI)` en
+  directorios) sin ninguna ACE heredada del padre.
+- **Windows Event Log**: el source `PrinklyPrint` queda registrado en el canal
+  Application por el instalador; los eventos se emiten y consultan (verificados
+  1001 `auth_failure` — sin filtrar el token —, 1004 `print_enqueued`, 1005).
+  Nota: el Visor muestra el texto del evento como dato de inserción (EventData),
+  el comportamiento estándar de los sources basados en `svc/eventlog`.
+
+**Sigue pendiente de validación**: la firma de código con un certificado real
+(requiere el certificado de producción; el pipeline la ejercita con `sign.ps1`).
+El detalle de cómo re-verificar todo está en `docs/PENTEST_GUIDE.md`.

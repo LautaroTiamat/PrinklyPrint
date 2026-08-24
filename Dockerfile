@@ -54,7 +54,13 @@ ACTUAL=$(sha256sum \"$SUMATRA\" | awk '{print $1}'); \
 if [ -z \"$EXPECTED\" ]; then echo 'ERROR: no encontré el SHA256 esperado de SumatraPDF en checksums.txt'; exit 1; fi; \
 if [ \"$EXPECTED\" != \"$ACTUAL\" ]; then echo \"ERROR: SHA256 de SumatraPDF no coincide. esperado=$EXPECTED obtenido=$ACTUAL\"; exit 1; fi; \
 echo \"SumatraPDF verificado OK ($ACTUAL)\"; \
-rsrc -manifest app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso; \
+MANIFEST=app.manifest; \
+case \"$VERSION\" in \
+  [0-9]*.[0-9]*.[0-9]*) \
+    sed \"s/version=\\\"0.0.0.0\\\"/version=\\\"${VERSION%%-*}.0\\\"/\" app.manifest > /tmp/app.manifest; \
+    MANIFEST=/tmp/app.manifest;; \
+esac; \
+rsrc -manifest \"$MANIFEST\" -ico icons/PrinklyPrint.ico -o rsrc.syso; \
 mkdir -p internal/tray/assets; \
 for spec in green:#2ea044 yellow:#d9a307 red:#dc2626; do \
   name=\"${spec%:*}\"; color=\"${spec#*:}\"; \

@@ -61,6 +61,7 @@ type App struct {
 	logger    *slog.Logger
 	logCloser interface{ Close() error }
 	cfg       *config.Manager
+	auth      *auth.Store
 	store     *store.Store
 	printer   *printer.Service
 	queue     *queue.Worker
@@ -159,14 +160,23 @@ func New(opts Options) (*App, error) {
 
 	printerSvc := printer.NewService(sumatraPath, logger.With("module", "printer"))
 	q := queue.New(queue.Config{
-		Store:         st,
-		Printer:       printerSvc,
-		Logger:        logger.With("module", "queue"),
-		PDFDir:        pdfDir,
-		TempDir:       tmpDir,
-		MaxRetries:    cfg.Get().MaxRetries,
-		RetentionDays: cfg.Get().RetentionDays,
+		Store:   st,
+		Printer: printerSvc,
+		Logger:  logger.With("module", "queue"),
+		PDFDir:  pdfDir,
+		TempDir: tmpDir,
+		// Valores en vivo: los cambios de max_retries/retention_days hechos desde
+		// la pestaña General aplican sin reiniciar el agente.
+		Settings: func() (int, int) {
+			c := cfg.Get()
+			return c.MaxRetries, c.RetentionDays
+		},
 	})
+	// La pausa persiste entre reinicios: si el operador dejó la cola pausada
+	// (config.Paused), el worker arranca pausado. El tray persiste el cambio.
+	if cfg.Get().Paused {
+		q.Pause()
+	}
 
 	// Prompter del handshake de pairing: en modo interactivo muestra un diálogo
 	// nativo; en headless (sin UI) deniega todo pareo que requiera diálogo, así
@@ -196,7 +206,7 @@ func New(opts Options) (*App, error) {
 
 	return &App{
 		opts: opts, dataDir: dataDir, logger: logger, logCloser: closer,
-		cfg: cfg, store: st, printer: printerSvc, queue: q, server: srv,
+		cfg: cfg, auth: authStore, store: st, printer: printerSvc, queue: q, server: srv,
 		secLog: secLog, machineID: mid, allowAny: allowAny, shutdown: make(chan struct{}),
 	}, nil
 }

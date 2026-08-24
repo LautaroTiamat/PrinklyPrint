@@ -46,6 +46,18 @@ type PrintSettingsTab struct {
 	printerList   *walk.ListBox
 	printersModel *printersModel
 	printers      []printer.Printer
+
+	// applying protege la config del usuario: SetModel/SetCurrentIndex disparan
+	// OnCurrentIndexChanged igual que un click humano, así que el refresh
+	// programático llamaba a persist() con los combos a medio armar y PISABA la
+	// config guardada (la impresora default volvía a "(default del sistema)" en
+	// cada refresco). Con el flag activo, persist() no hace nada. Solo se toca
+	// desde el hilo de UI.
+	applying bool
+	// comboItems cachea el último modelo aplicado al combo de impresoras para
+	// no resetearlo (y cerrarle el dropdown al operador) cada 5 segundos si la
+	// lista no cambió.
+	comboItems []string
 }
 
 func NewPrintSettingsTab(cfg *config.Manager, pr *printer.Service, q *queue.Worker, lang i18n.Lang) *PrintSettingsTab {
@@ -130,7 +142,10 @@ func (p *PrintSettingsTab) Page() TabPage {
 }
 
 func (p *PrintSettingsTab) persist() {
-	if p.printerCombo == nil {
+	// Los cambios programáticos (SetModel/SetCurrentIndex durante un refresh)
+	// disparan los mismos eventos que un click del operador: con applying
+	// activo NO persistimos, o pisaríamos la config guardada.
+	if p.applying || p.printerCombo == nil {
 		return
 	}
 	prn := ""
@@ -165,11 +180,19 @@ func max0(i int) int {
 	return i
 }
 
+// RefreshPrinters relee las impresoras del sistema y sincroniza los controles
+// con la config guardada. Debe llamarse en el hilo de UI (los callers pasan
+// por mw.Synchronize).
 func (p *PrintSettingsTab) RefreshPrinters() {
 	list, err := p.pr.List(context.Background())
 	if err != nil {
 		return
 	}
+	// Todo lo que sigue son cambios programáticos: persist() queda deshabilitado
+	// para no pisar la config con estados intermedios de los combos.
+	p.applying = true
+	defer func() { p.applying = false }()
+
 	p.printers = list
 	p.printersModel.set(list)
 
@@ -180,19 +203,36 @@ func (p *PrintSettingsTab) RefreshPrinters() {
 	for _, pr := range list {
 		items = append(items, pr.Name)
 	}
-	_ = p.printerCombo.SetModel(items)
+	// Solo reseteamos el modelo si la lista cambió: SetModel cierra el dropdown
+	// si el operador lo tenía abierto y resetea la selección.
+	if !stringsEqual(items, p.comboItems) {
+		_ = p.printerCombo.SetModel(items)
+		p.comboItems = items
+	}
 	cur := p.cfg.Get().DefaultPrinter
-	if cur == "" {
-		p.printerCombo.SetCurrentIndex(0)
-	} else {
-		for i, pr := range list {
-			if pr.Name == cur {
-				p.printerCombo.SetCurrentIndex(i + 1)
-				break
-			}
+	idx := 0 // "(default del sistema)" — también si la impresora guardada ya no existe
+	for i, pr := range list {
+		if pr.Name == cur {
+			idx = i + 1
+			break
 		}
 	}
+	if p.printerCombo.CurrentIndex() != idx {
+		p.printerCombo.SetCurrentIndex(idx)
+	}
 	p.applyConfigToControls()
+}
+
+func stringsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *PrintSettingsTab) applyConfigToControls() {

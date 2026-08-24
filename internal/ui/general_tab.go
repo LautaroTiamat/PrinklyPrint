@@ -13,9 +13,11 @@
 //
 //   - Orígenes CORS: whitelist de dominios autorizados a llamar al server
 //     local. El operador agrega/quita orígenes con LineEdit + dos botones.
-//     El checkbox "Permitir cualquier origen" se usa solo para debugging.
+//     El modo "permitir cualquier origen" se muestra como etiqueta de solo
+//     lectura: lo controla el instalador vía HKLM (ver internal/insecure).
 //
-//   - Cola: max retries (default 1) y días de retención (default 7).
+//   - Cola: max retries (default 1, reintentos tras el intento inicial) y días
+//     de retención (default 7). Aplican en vivo, sin reiniciar el agente.
 //
 //   - Información: versión del agente, machine ID, ruta del data dir.
 //
@@ -33,6 +35,7 @@ import (
 	"github.com/lautarotiamat/prinklyprint/internal/autostart"
 	"github.com/lautarotiamat/prinklyprint/internal/config"
 	"github.com/lautarotiamat/prinklyprint/internal/i18n"
+	"github.com/lautarotiamat/prinklyprint/internal/server"
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
 )
@@ -49,6 +52,9 @@ type generalDeps struct {
 	// onSettingsChanged, si no es nil, se llama cuando el operador cambia un
 	// setting desde la UI (lo usamos para emitir el evento de seguridad al SIEM).
 	onSettingsChanged func(detail string)
+	// onRotateToken regenera el token de la instalación (auth.RotateToken +
+	// evento SIEM 1006). Todas las apps pareadas tendrán que volver a parear.
+	onRotateToken func() error
 }
 
 type GeneralTab struct {
@@ -160,7 +166,10 @@ func (g *GeneralTab) Page() TabPage {
 							PushButton{
 								Text: "＋  " + i18n.T(g.d.lang, "gen.cors_add"),
 								OnClicked: func() {
-									v := g.newOriginEdit.Text()
+									// Normalizamos lo que escribe el operador (espacios,
+									// barra final): "https://a.com/" debe matchear el
+									// Origin "https://a.com" que manda el navegador.
+									v := server.NormalizeOrigin(g.newOriginEdit.Text())
 									if v == "" {
 										return
 									}
@@ -308,6 +317,27 @@ func (g *GeneralTab) Page() TabPage {
 						Text: "📂  " + i18n.T(g.d.lang, "gen.open_logs"),
 						OnClicked: func() {
 							_ = exec.Command("explorer", filepath.Join(g.d.dataDir, "logs")).Start()
+						},
+					},
+					PushButton{
+						Text: "🔑  " + i18n.T(g.d.lang, "gen.rotate_token"),
+						OnClicked: func() {
+							if g.d.onRotateToken == nil {
+								return
+							}
+							// Confirmación con "No" como default: invalida el token de
+							// TODAS las apps pareadas (tendrán que volver a parear).
+							if walk.MsgBox(nil, i18n.T(g.d.lang, "app.title"),
+								i18n.T(g.d.lang, "gen.rotate_confirm"),
+								walk.MsgBoxYesNo|walk.MsgBoxIconWarning|walk.MsgBoxDefButton2) != walk.DlgCmdYes {
+								return
+							}
+							if err := g.d.onRotateToken(); err != nil {
+								walk.MsgBox(nil, i18n.T(g.d.lang, "app.error"), err.Error(), walk.MsgBoxIconError)
+								return
+							}
+							walk.MsgBox(nil, i18n.T(g.d.lang, "app.title"),
+								i18n.T(g.d.lang, "gen.rotate_done"), walk.MsgBoxIconInformation)
 						},
 					},
 					HSpacer{},

@@ -31,18 +31,21 @@ Ejecutable:
 
 **Permisos owner-only (DACL).** En Windows, los archivos/directorios sensibles
 reciben una **DACL protegida** (sin herencia del padre) que concede Full Control
-solo a: el **dueño** del objeto, **Local System (SY)** y **Administradores
-locales (BA)**. Cualquier otro usuario queda sin acceso. La DACL exacta es:
+solo a: el **SID explícito del usuario** que corre el agente, **Local System
+(SY)** y **Administradores locales (BA)**. Cualquier otro usuario queda sin
+acceso. La DACL exacta (desde 1.2.1; en directorios las ACEs son heredables
+`OICI` para que los archivos creados adentro hereden el acceso) es:
 
 ```
-D:PAI(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)
+Directorios: D:PAI(A;OICI;FA;;;<SID usuario>)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)
+Archivos:    D:PAI(A;;FA;;;<SID usuario>)(A;;FA;;;SY)(A;;FA;;;BA)
 ```
 
 En entornos no-Windows (solo desarrollo/CI) el equivalente es `0o600` para
 archivos y `0o700` para directorios.
 
-> Pendiente de validación en Windows real: que la DACL quede efectivamente
-> owner-only. Verificable con `icacls <ruta>` (ver `docs/PENTEST_GUIDE.md`).
+> Validado en Windows real en la release 1.2.1 (ver CHANGELOG). Podés
+> re-verificarlo en tu despliegue con `icacls <ruta>` (ver `docs/PENTEST_GUIDE.md`).
 
 ---
 

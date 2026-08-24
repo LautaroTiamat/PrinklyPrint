@@ -2,7 +2,85 @@
 
 Todas las versiones notables de PrinklyPrint quedan documentadas acá. Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el proyecto sigue [Semantic Versioning](https://semver.org/lang/es/).
 
-## [1.3.1] — 2026-06-29
+## [1.4.0] — 2026-08-24
+
+### Agregado
+- **Botón «Regenerar token» en General**: rota el token de la instalación en
+  caliente (confirmación con «No» por default) y emite el evento SIEM 1006
+  (`token_rotated`), que hasta ahora estaba definido pero nunca se emitía.
+  El procedimiento de emergencia (borrar `auth.json`) sigue disponible.
+- **Contrato de API** (`contract/api-shapes.json` + `TestAPIContract`): fija la
+  forma (claves + tipos JSON) de cada respuesta del agente, generada desde los
+  handlers reales. La librería PrinklyPrint.js lleva una copia y un test espejo
+  que valida sus tipos TypeScript contra ella — el drift Go↔TS (como el
+  traslado de `machine_id` de `/ping` a `/settings`) ahora rompe un test.
+  Regenerar con `CONTRACT_UPDATE=1 go test ./internal/server -run TestAPIContract`.
+- **Flag `--data-dir`**: permite aislar una instancia de prueba (tests, pentest)
+  del data dir real en `%LOCALAPPDATA%`.
+
+### Cambiado
+- **Bandeja del sistema migrada de fyne.io/systray a walk.NotifyIcon** (una
+  dependencia menos y el comportamiento estándar de Windows): el menú se abre
+  SOLO con click derecho, el doble click izquierdo abre la ventana principal, y
+  el click izquierdo simple no hace nada. Antes cualquier click abría el menú.
+- **Abrir desde la bandeja trae la ventana al frente** como cualquier app
+  (restaura si estaba minimizada, sin des-maximizar, y pide el foreground).
+- **La pausa de la cola persiste y es consistente.** Antes, `paused: true` en el
+  `config.yaml` se ignoraba al arrancar (la pausa no sobrevivía reinicios) y el
+  menú del tray pausaba el worker sin persistir la config, con lo cual
+  `GET /ping` (lee el worker) y `GET /settings` (lee la config) podían reportar
+  `paused` distinto. Ahora el worker arranca pausado si la config lo indica y el
+  tray persiste cada cambio.
+- **`max_retries` ahora significa lo que dice.** Con el default `1`, el primer
+  fallo marcaba el job como `failed` sin ningún reintento (la comparación era
+  contra intentos totales). Ahora `max_retries` cuenta **reintentos después del
+  intento inicial**: con `1`, un job se reintenta una vez (backoff 5s) antes de
+  quedar `failed`.
+- **`max_retries` y `retention_days` aplican en vivo.** El worker los congelaba
+  al construirse: cambiarlos desde la pestaña General recién surtía efecto al
+  reiniciar el agente. Ahora el worker consulta la config vigente en cada uso.
+- **Rango de puerto unificado a 1024–65535.** La validación de config aceptaba
+  1–65535 mientras la UI y el README decían 1024–65535; un `config.yaml` editado
+  a mano con un puerto privilegiado (80) pasaba la validación y fallaba al
+  bindear. Las configs existentes no se ven afectadas (solo se valida al
+  guardar cambios).
+- **La versión del assembly manifest ya no queda hardcodeada en `0.1.0.0`**: el
+  build (Dockerfile y release.yml) sustituye el placeholder `0.0.0.0` de
+  `app.manifest` por la versión real antes de generar `rsrc.syso`.
+- **Un origen con barra final ya matchea.** El operador que escribía
+  `https://app.empresa.com/` en Orígenes CORS (o con espacios, o con otra
+  capitalización) nunca matcheaba el header `Origin` del navegador y el agente
+  no reconocía al cliente. Ahora el match normaliza ambos lados (espacios y
+  `/` finales fuera, comparación case-insensitive) — también para wildcards
+  (`*.empresa.com/`) —, la UI guarda el valor ya normalizado y la aprobación
+  de pairing también. Las entradas sin esquema siguen matcheando http y https
+  por diseño (intranets sin TLS).
+- **La pestaña Impresión ya no pisa la config guardada.** El refresco periódico
+  de la lista de impresoras disparaba los mismos eventos que un click humano
+  con los combos a medio armar, y persistía ese estado intermedio: la impresora
+  default elegida volvía a «(default del sistema)» sola — por eso la
+  configuración parecía no guardarse entre reinicios. El refresh programático
+  ahora no persiste, y el modelo del combo solo se resetea si la lista de
+  impresoras realmente cambió (tampoco se cierra más el dropdown solo).
+- **Los refresh automáticos de la ventana corren en el hilo de UI.** Se
+  llamaban directo desde goroutines (prohibido en Win32) y corrompían el estado
+  de la ventana — la causa más probable de que una ventana maximizada dejara de
+  responder a cerrar/minimizar/restaurar. Ahora todo pasa por `Synchronize`.
+
+### Documentación
+- `docs/THREAT_MODEL.md`: la sección «validación en Windows real» refleja lo
+  verificado sobre una instalación de producción 1.3.1 (Windows 11 IoT LTSC):
+  cifrado DPAPI en reposo (blob con GUID `d08c9ddf…`, no un PDF legible), DACL
+  owner-only exacta vía `icacls`, y eventos 1001/1004/1005 emitidos y
+  consultables en el Event Log. Queda pendiente solo la firma con certificado real.
+- `SECURITY.md`: tabla de versiones soportadas actualizada a 1.3.x.
+- `docs/THREAT_MODEL.md` y `docs/DEPLOYMENT_HARDENING.md`: la DACL owner-only
+  figura como **validada en Windows real** (lo estaba desde 1.2.1) y el SDDL
+  documentado ahora es el vigente (SID explícito + ACEs heredables en
+  directorios), no el de 1.2.0.
+- README: se agregaron `winfs`, `crypto/dpapi`, `seclog` e `insecure` a la tabla
+  de paquetes (e `insecure` al árbol), y el ejemplo de config documenta la
+  semántica real de `max_retries` y la persistencia de `paused`.
 
 ### Seguridad
 - **Hardening de permisos de directorio**: los directorios privados que crea el

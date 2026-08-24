@@ -8,9 +8,10 @@
 //     orden de impresión.
 //
 //   - Reintentos con backoff exponencial: cuando un job falla, se reencola
-//     con un next_attempt_at futuro (default: 5s, 30s, 2min). Después de
-//     MaxRetries fallidos, queda en estado "failed" y el operador puede
-//     reintentar manualmente desde la UI.
+//     con un next_attempt_at futuro (default: 5s, 30s, 2min). MaxRetries cuenta
+//     REINTENTOS después del intento inicial: un job agota la cola tras
+//     1+MaxRetries intentos y queda en estado "failed"; el operador puede
+//     reintentarlo manualmente desde la UI.
 //
 //   - Pausa cooperativa: [Worker.Pause]/[Worker.Resume] permiten que el
 //     operador detenga temporalmente el procesamiento sin matar el agente.
@@ -80,12 +81,18 @@ type Config struct {
 	Logger          *slog.Logger
 	PDFDir          string
 	TempDir         string // dir para los PDFs descifrados temporales de impresión
-	MaxRetries      int
+	MaxRetries      int    // reintentos DESPUÉS del intento inicial (total = 1+MaxRetries)
 	Backoffs        []time.Duration
 	RetentionDays   int
 	PrintTimeout    time.Duration
 	PollInterval    time.Duration
 	CleanupInterval time.Duration
+
+	// Settings, si no es nil, devuelve los valores vigentes de max_retries y
+	// retention_days en cada uso, para que los cambios hechos desde la UI
+	// apliquen sin reiniciar el agente. Si es nil (o devuelve valores fuera de
+	// rango), se usan los campos estáticos MaxRetries/RetentionDays.
+	Settings func() (maxRetries, retentionDays int)
 }
 
 type Worker struct {
@@ -125,6 +132,26 @@ func (w *Worker) Pause()         { w.paused.Store(true) }
 func (w *Worker) Resume()        { w.paused.Store(false) }
 func (w *Worker) IsPaused() bool { return w.paused.Load() }
 func (w *Worker) IsBusy() bool   { return w.busy.Load() }
+
+// maxRetries y retentionDays consultan el hook Settings (valores en vivo) y
+// caen a los campos estáticos si no hay hook o devuelve algo fuera de rango.
+func (w *Worker) maxRetries() int {
+	if w.cfg.Settings != nil {
+		if mr, _ := w.cfg.Settings(); mr >= 0 {
+			return mr
+		}
+	}
+	return w.cfg.MaxRetries
+}
+
+func (w *Worker) retentionDays() int {
+	if w.cfg.Settings != nil {
+		if _, rd := w.cfg.Settings(); rd > 0 {
+			return rd
+		}
+	}
+	return w.cfg.RetentionDays
+}
 
 func (w *Worker) Run(ctx context.Context) error {
 	defer close(w.done)
@@ -317,7 +344,10 @@ func (w *Worker) sweepTempDir() {
 
 func (w *Worker) fail(ctx context.Context, j *store.Job, lastErr error, sumatraLog string) {
 	attempts := j.Attempts + 1
-	if attempts >= w.cfg.MaxRetries {
+	// attempts cuenta intentos TOTALES; maxRetries() cuenta reintentos después
+	// del intento inicial. Con max_retries=1 (default): 1er fallo → reencola,
+	// 2do fallo → failed. Así "reintentos automáticos" significa lo que dice.
+	if attempts > w.maxRetries() {
 		if err := w.cfg.Store.MarkFailed(ctx, j.ID, attempts, lastErr.Error(), sumatraLog); err != nil {
 			w.cfg.Logger.Error("MarkFailed", "err", err)
 		}
@@ -334,7 +364,7 @@ func (w *Worker) fail(ctx context.Context, j *store.Job, lastErr error, sumatraL
 }
 
 func (w *Worker) cleanup(ctx context.Context) {
-	cutoff := time.Now().UTC().AddDate(0, 0, -w.cfg.RetentionDays)
+	cutoff := time.Now().UTC().AddDate(0, 0, -w.retentionDays())
 	paths, err := w.cfg.Store.DeleteOlderThan(ctx, cutoff)
 	if err != nil {
 		w.cfg.Logger.Error("cleanup", "err", err)

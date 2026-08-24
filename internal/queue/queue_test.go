@@ -154,6 +154,67 @@ func TestSweepTempDirNoDir(t *testing.T) {
 	w.sweepTempDir()
 }
 
+func TestFailRetriesBeforeFailing(t *testing.T) {
+	// max_retries cuenta reintentos DESPUÉS del intento inicial: con el default
+	// (1), el primer fallo reencola con backoff y el segundo deja el job failed.
+	w, st, _ := testWorker(t)
+	ctx := context.Background()
+	b64 := base64.StdEncoding.EncodeToString([]byte(samplePDF))
+	id, err := w.Enqueue(ctx, EnqueueParams{PDFBase64: b64})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	j, err := st.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	w.fail(ctx, j, errors.New("boom"), "")
+	j, _ = st.GetJob(ctx, id)
+	if j.Status != store.StatusQueued {
+		t.Fatalf("tras el primer fallo el job debería reencolarse, está %q", j.Status)
+	}
+	if j.Attempts != 1 {
+		t.Fatalf("attempts tras el primer fallo = %d, quiero 1", j.Attempts)
+	}
+
+	w.fail(ctx, j, errors.New("boom"), "")
+	j, _ = st.GetJob(ctx, id)
+	if j.Status != store.StatusFailed {
+		t.Fatalf("tras agotar el reintento el job debería quedar failed, está %q", j.Status)
+	}
+}
+
+func TestSettingsHookOverridesStatics(t *testing.T) {
+	// El hook Settings entrega valores en vivo; los campos estáticos son fallback.
+	maxR, ret := 5, 30
+	w := New(Config{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Settings: func() (int, int) { return maxR, ret },
+	})
+	if got := w.maxRetries(); got != 5 {
+		t.Errorf("maxRetries() = %d, quiero 5", got)
+	}
+	if got := w.retentionDays(); got != 30 {
+		t.Errorf("retentionDays() = %d, quiero 30", got)
+	}
+	maxR, ret = 2, 10 // simula un cambio desde la pestaña General, sin reiniciar
+	if got := w.maxRetries(); got != 2 {
+		t.Errorf("maxRetries() tras cambio = %d, quiero 2", got)
+	}
+	if got := w.retentionDays(); got != 10 {
+		t.Errorf("retentionDays() tras cambio = %d, quiero 10", got)
+	}
+	// Valores fuera de rango del hook → fallback a los estáticos (defaults 1 y 7).
+	maxR, ret = -1, 0
+	if got := w.maxRetries(); got != 1 {
+		t.Errorf("maxRetries() con hook inválido = %d, quiero fallback 1", got)
+	}
+	if got := w.retentionDays(); got != 7 {
+		t.Errorf("retentionDays() con hook inválido = %d, quiero fallback 7", got)
+	}
+}
+
 func TestLooksLikePDF(t *testing.T) {
 	if !looksLikePDF([]byte("%PDF-1.7 ...")) {
 		t.Error("un PDF válido debería pasar")

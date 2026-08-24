@@ -25,8 +25,8 @@ release más reciente antes de reportar para descartar problemas ya corregidos.
 
 | Versión | Soporte |
 |---------|---------|
-| 1.2.x   | ✅ |
-| < 1.2   | ❌ (actualizá) |
+| 1.4.x   | ✅ |
+| < 1.4   | ❌ (actualizá) |
 
 ## Resumen de la postura de seguridad
 

@@ -56,7 +56,11 @@ var version = "dev"
 const eventLogSource = "PrinklyPrint"
 
 func main() {
-	headless := flag.Bool("headless", false, "Arranca sin UI (solo server + queue + tray)")
+	headless := flag.Bool("headless", false, "Arranca sin UI (solo server + queue)")
+	// data-dir permite aislar una instancia de prueba (tests, pentest) del data
+	// dir real en %LOCALAPPDATA%. OJO: el lock de instancia única es global por
+	// sesión, así que aun con data dirs distintos solo corre un agente a la vez.
+	dataDir := flag.String("data-dir", "", "Data dir alternativo (default: %LOCALAPPDATA%\\PrinklyPrint)")
 	showVersion := flag.Bool("version", false, "Muestra la versión y sale")
 	// Registro del Event Log (requiere admin): lo corre el instalador elevado.
 	registerEvt := flag.Bool("register-eventlog", false, "Registra el source del Event Log (requiere admin) y sale")
@@ -92,7 +96,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	a, err := app.New(app.Options{Version: version, Headless: *headless})
+	a, err := app.New(app.Options{Version: version, Headless: *headless, DataDir: *dataDir})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)

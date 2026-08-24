@@ -90,7 +90,13 @@ jobs:
       - name: Generate rsrc.syso (manifest + .exe icon)
         # rsrc viene pineado en go.mod/go.sum vía tools.go; `go run` usa esa
         # versión con integridad verificada (no @latest).
-        run: go run github.com/akavel/rsrc -manifest app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso
+        # El version="0.0.0.0" del manifest es un placeholder: acá se sustituye
+        # por la versión real del tag (X.Y.Z.0) antes de generar el .syso.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed "s/version=\"0.0.0.0\"/version=\"${VERSION%%-*}.0\"/" app.manifest > /tmp/app.manifest
+          go run github.com/akavel/rsrc -manifest /tmp/app.manifest -ico icons/PrinklyPrint.ico -o rsrc.syso
 
       - name: Generate tray icons
         run: |

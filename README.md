@@ -50,7 +50,7 @@ await fetch('http://127.0.0.1:17777/print', {  // puerto configurable desde la U
 | ✅  **Orígenes aprobados visibles** | Los sitios que aprobás quedan en la lista de **General → Orígenes CORS**, donde los ves y los podés quitar (quitar = revocar). Soporta wildcards de subdominio para pre-aprobar. |
 | 🌍  **3 idiomas** | Español, Inglés y Portugués — autodetectados desde el SO. |
 | 🚀  **Inicio con Windows** | Configurable desde la UI. Se activa por defecto al instalar. |
-| 🔔  **Bandeja del sistema** | Ícono semafórico (verde/amarillo/rojo) que indica el estado de la cola a simple vista. |
+| 🔔  **Bandeja del sistema** | Ícono semafórico (verde/amarillo/rojo) que indica el estado de la cola a simple vista. Doble click abre la ventana; click derecho abre el menú. |
 | 🔄  **Upgrades sin fricción** | El instalador cierra la versión vieja y pisa los archivos limpiamente. |
 | 📦  **Cero dependencias** | El `.exe` es un binario único. Nada de runtimes ni frameworks adicionales. |
 
@@ -153,8 +153,9 @@ allowed_origins:
   - https://miapp.empresa.com
   - https://*.empresa.com
 auto_start: true
-max_retries: 1
+max_retries: 1              # reintentos automáticos DESPUÉS del primer intento fallido (0-20)
 retention_days: 7
+paused: false               # la pausa de la cola (menú del tray) persiste entre reinicios
 paper_size: A4
 orientation: portrait
 color: true
@@ -205,6 +206,10 @@ scale: fit
 | [`server`](internal/server/) | HTTP API con token Bearer + CORS estricto. |
 | [`tray`](internal/tray/) | Ícono de bandeja con i18n reactivo y menú contextual. |
 | [`ui`](internal/ui/) | Ventana nativa Win32 con `lxn/walk` (3 pestañas). |
+| [`winfs`](internal/winfs/) | Permisos owner-only (DACL protegida en Windows). |
+| [`crypto/dpapi`](internal/crypto/dpapi/) | Cifrado en reposo (DPAPI, scope usuario) de los PDFs. |
+| [`seclog`](internal/seclog/) | Eventos de seguridad → slog + Windows Event Log (SIEM). |
+| [`insecure`](internal/insecure/) | Lectura de la marca HKLM del modo "permitir cualquier origen" (solo la escribe el instalador). |
 | [`i18n`](internal/i18n/) | Diccionario ES/EN/PT. |
 | [`locale`](internal/locale/) | Autodetección del idioma del SO. |
 | [`logging`](internal/logging/) | `log/slog` JSON con rotación diaria. |
@@ -389,6 +394,7 @@ PrinklyPrint/
     ├── auth/                     Token por instalación + orígenes pareados
     ├── winfs/                    Permisos owner-only (DACL Windows / chmod stub)
     ├── crypto/dpapi/             Cifrado en reposo (DPAPI) de los PDFs
+    ├── insecure/                 Marca HKLM del modo "permitir cualquier origen" (solo instalador)
     ├── seclog/                   Eventos de seguridad → slog + Event Log (SIEM)
     ├── store/                    SQLite (sin CGO)
     ├── printer/                  EnumPrinters + SumatraPDF
@@ -435,7 +441,7 @@ Sí, con dos capas. El server bindea **solo a `127.0.0.1`** (loopback) — no es
 Exentos de token: `GET /ping` (liveness) y `POST /pair` (es quien emite el token). Para entornos `--headless` (sin UI para el diálogo), pre-aprobá los orígenes en `allowed_origins`.
 
 **¿Cómo revoco el acceso de una app, o fuerzo el re-pairing?**
-Para revocar **una app puntual**: quitá su origen de **General → Orígenes CORS**. Deja de estar autorizada y la próxima vez que intente, el agente volverá a pedir aprobación. Para invalidar **todos** los tokens de golpe (sospecha de filtración): borrá `%LOCALAPPDATA%\PrinklyPrint\auth.json` y reiniciá el agente — genera un token nuevo y las apps tendrán que re-parear (silencioso para los orígenes que sigan aprobados en la lista). _(Una acción "Regenerar token" en la UI está planificada.)_
+Para revocar **una app puntual**: quitá su origen de **General → Orígenes CORS**. Deja de estar autorizada y la próxima vez que intente, el agente volverá a pedir aprobación. Para invalidar **todos** los tokens de golpe (sospecha de filtración): **General → «Regenerar token»** — rota el token en caliente (con confirmación) y emite el evento de seguridad 1006; las apps tendrán que re-parear (silencioso para los orígenes que sigan aprobados en la lista). Alternativa de emergencia sin UI: borrá `%LOCALAPPDATA%\PrinklyPrint\auth.json` y reiniciá el agente.
 
 **¿Y si necesito que arranque antes de que un usuario haga login?**
 PrinklyPrint admite el flag `--headless` (sin UI ni bandeja, solo server + cola). Podés registrar una scheduled task con cuenta SYSTEM si tu caso requiere arranque pre-login.

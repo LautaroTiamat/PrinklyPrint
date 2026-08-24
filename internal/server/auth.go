@@ -114,11 +114,13 @@ func (s *Server) originApproved(origin string) bool {
 }
 
 // approveOrigin agrega el origen a la lista de orígenes permitidos (config),
-// que es la lista visible en la UI. Idempotente.
+// que es la lista visible en la UI. Idempotente. Se normaliza (espacios y
+// barras finales fuera) para que la lista quede limpia y matchee siempre.
 func (s *Server) approveOrigin(origin string) error {
+	origin = NormalizeOrigin(origin)
 	return s.cfg.Config.Update(func(c *config.Config) {
 		for _, o := range c.AllowedOrigins {
-			if o == origin {
+			if NormalizeOrigin(o) == origin {
 				return
 			}
 		}

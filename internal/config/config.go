@@ -194,8 +194,9 @@ func mergeDefaults(c Config) Config {
 }
 
 func validate(c Config) error {
-	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("port fuera de rango: %d", c.Port)
+	// Mismo rango que la UI y el README (1024–65535): sin puertos privilegiados.
+	if c.Port < 1024 || c.Port > 65535 {
+		return fmt.Errorf("port fuera de rango (1024-65535): %d", c.Port)
 	}
 	if c.MaxRetries < 0 || c.MaxRetries > 20 {
 		return fmt.Errorf("max_retries fuera de rango: %d", c.MaxRetries)

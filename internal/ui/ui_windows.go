@@ -24,8 +24,10 @@ import (
 	"github.com/lautarotiamat/prinklyprint/internal/printer"
 	"github.com/lautarotiamat/prinklyprint/internal/queue"
 	"github.com/lautarotiamat/prinklyprint/internal/store"
+	"github.com/lautarotiamat/prinklyprint/internal/tray"
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
 
 type Window struct {
@@ -45,6 +47,15 @@ type Window struct {
 	// OnSettingsChanged, si no es nil, se invoca cuando el operador cambia un
 	// setting desde la UI (lo usamos para emitir el evento de seguridad al SIEM).
 	OnSettingsChanged func(detail string)
+	// OnRotateToken regenera el token de la instalación (botón de la pestaña
+	// General). Lo provee app para no acoplar la UI al paquete auth.
+	OnRotateToken func() error
+
+	// TrayHooks y TrayIconDir configuran el ícono de bandeja (walk.NotifyIcon),
+	// que vive en el mismo hilo de mensajes que la ventana. TrayIconDir es donde
+	// se extraen los .ico embebidos del semáforo.
+	TrayHooks   tray.Hooks
+	TrayIconDir string
 
 	mw            *walk.MainWindow
 	tabWidget     *walk.TabWidget
@@ -77,6 +88,7 @@ func (w *Window) Run(ctx context.Context) error {
 		onShutdown:        w.OnShutdown,
 		onLangChange:      func(l i18n.Lang) { w.applyLanguage(l) },
 		onSettingsChanged: w.OnSettingsChanged,
+		onRotateToken:     w.OnRotateToken,
 	})
 
 	// El ícono aparece en barra de título, taskbar y Alt+Tab. Si la decodificación
@@ -106,6 +118,15 @@ func (w *Window) Run(ctx context.Context) error {
 		return err
 	}
 
+	// El tray (walk.NotifyIcon) se crea DESPUÉS de la ventana, en este mismo
+	// goroutine: comparte el hilo de mensajes de la MainWindow. Si falla, la app
+	// sigue sin ícono de bandeja (la ventana y el server no dependen de él).
+	if tr, err := tray.Attach(w.mw, w.TrayIconDir, w.Store, w.Queue, w.Config, w.Logger, w.TrayHooks); err != nil {
+		w.Logger.Error("no se pudo crear el ícono de bandeja", "err", err)
+	} else {
+		go tr.Run(ctx)
+	}
+
 	// Goroutine: requests del tray + shutdown del ctx.
 	go func() {
 		for {
@@ -121,8 +142,7 @@ func (w *Window) Run(ctx context.Context) error {
 					if idx >= 0 && idx <= 2 {
 						w.tabWidget.SetCurrentIndex(idx)
 					}
-					w.mw.Show()
-					_ = w.mw.SetFocus()
+					w.bringToFront()
 					w.queueTab.Refresh()
 					w.printTab.RefreshPrinters()
 				})
@@ -159,6 +179,21 @@ func (w *Window) OpenTab(idx int) {
 	}
 }
 
+// bringToFront muestra la ventana y la trae al frente como cualquier app
+// normal: si estaba minimizada la restaura (sin des-maximizar una ventana
+// maximizada) y le pide el foreground al SO. Debe llamarse en el hilo de UI.
+func (w *Window) bringToFront() {
+	hwnd := w.mw.Handle()
+	if !w.mw.Visible() {
+		w.mw.Show()
+	}
+	if win.IsIconic(hwnd) {
+		win.ShowWindow(hwnd, win.SW_RESTORE)
+	}
+	win.SetForegroundWindow(hwnd)
+	_ = w.mw.SetFocus()
+}
+
 func (w *Window) applyLanguage(newLang i18n.Lang) {
 	if newLang == w.currentLang {
 		return
@@ -176,24 +211,37 @@ func (w *Window) applyLanguage(newLang i18n.Lang) {
 	)
 }
 
+// autoRefreshLoop refresca las pestañas mientras la ventana está visible.
+//
+// IMPORTANTE: los controles walk solo pueden tocarse desde el hilo de UI —
+// todo pasa por mw.Synchronize. Llamarlos directo desde estas goroutines
+// (como se hacía antes) corrompe el estado de la ventana y producía cuelgues
+// intermitentes (por ejemplo, la ventana maximizada dejaba de responder a
+// cerrar/minimizar/restaurar).
 func (w *Window) autoRefreshLoop(ctx context.Context) {
 	go w.tickEvery(ctx, 2*time.Second, func() {
-		if w.mw.Visible() {
-			w.queueTab.Refresh()
-		}
+		w.mw.Synchronize(func() {
+			if w.mw.Visible() {
+				w.queueTab.Refresh()
+			}
+		})
 	})
 	go w.tickEvery(ctx, 5*time.Second, func() {
-		if w.mw.Visible() {
-			w.printTab.RefreshPrinters()
-		}
+		w.mw.Synchronize(func() {
+			if w.mw.Visible() {
+				w.printTab.RefreshPrinters()
+			}
+		})
 	})
 	// Refresca la lista de orígenes permitidos: un pareo aprobado agrega el
 	// origen a la config y queremos que aparezca en la pestaña General sin
 	// reabrir la ventana.
 	go w.tickEvery(ctx, 2*time.Second, func() {
-		if w.mw.Visible() {
-			w.generalTab.Refresh()
-		}
+		w.mw.Synchronize(func() {
+			if w.mw.Visible() {
+				w.generalTab.Refresh()
+			}
+		})
 	})
 }
 

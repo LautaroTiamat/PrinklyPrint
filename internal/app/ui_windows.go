@@ -4,12 +4,14 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/lautarotiamat/prinklyprint/internal/tray"
 	"github.com/lautarotiamat/prinklyprint/internal/ui"
 )
 
-// runUI arranca el tray + ventana nativa Win32.
+// runUI arranca la ventana nativa Win32; el tray (walk.NotifyIcon) lo crea la
+// propia ventana en su hilo de mensajes (ver ui.Window.Run).
 func (a *App) runUI(ctx context.Context) error {
 	win := &ui.Window{
 		Store:          a.store,
@@ -25,9 +27,17 @@ func (a *App) runUI(ctx context.Context) error {
 		OnSettingsChanged: func(detail string) {
 			a.secLog.SettingsChanged(detail)
 		},
+		OnRotateToken: func() error {
+			if err := a.auth.RotateToken(); err != nil {
+				return err
+			}
+			a.secLog.TokenRotated()
+			return nil
+		},
+		TrayIconDir: filepath.Join(a.dataDir, "bin"),
 	}
 
-	hooks := tray.Hooks{
+	win.TrayHooks = tray.Hooks{
 		OnOpenMain:     func() { win.OpenTab(0) },
 		OnOpenQueue:    func() { win.OpenTab(0) },
 		OnOpenSettings: func() { win.OpenTab(2) },
@@ -41,9 +51,6 @@ func (a *App) runUI(ctx context.Context) error {
 			return true
 		},
 	}
-
-	tr := tray.New(a.store, a.queue, a.cfg, a.logger.With("module", "tray"), hooks)
-	go tr.Run(ctx)
 
 	return win.Run(ctx)
 }
